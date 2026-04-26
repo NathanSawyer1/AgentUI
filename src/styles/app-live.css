@@ -1,0 +1,125 @@
+.sb-nav.active {
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border-left-color: var(--accent);
+}
+
+.gateway-panel {
+  flex: 1;
+  min-height: 0;
+  padding: 22px 28px;
+  overflow: auto;
+  background: var(--bg-0);
+}
+
+.gateway-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gateway-sub {
+  margin-top: 4px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.gateway-pill {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+
+.gateway-pill.online { color: var(--ok); }
+.gateway-pill.degraded { color: var(--warn); }
+.gateway-pill.offline { color: var(--err); }
+
+.gateway-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.gateway-metrics div {
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gateway-metrics span,
+.gateway-node em {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.gateway-metrics strong,
+.gateway-node strong {
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+}
+
+.gateway-bars {
+  height: 100px;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  margin: 20px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  border-radius: var(--radius);
+}
+
+.gateway-nodes {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.gateway-node {
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gateway-node:last-child { border-bottom: 0; }
+
+.error-banner {
+  margin: 12px 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in oklch, var(--err) 45%, var(--line));
+  background: color-mix(in oklch, var(--err) 14%, var(--bg-1));
+  color: var(--fg-0);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+}
+
+.error-banner.inline {
+  margin: 12px 28px 0;
+}
+
+.check-row {
+  flex-direction: row;
+  align-items: center;
+  color: var(--fg-1);
+}
