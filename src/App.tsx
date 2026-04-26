@@ -11,7 +11,9 @@ export function App() {
   const [leftW, setLeftW] = useState(60);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [gateway, setGateway] = useState<GatewayStatus | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState(SESSIONS.find((x) => x.active)?.name ?? SESSIONS[0].name);
   const dragging = useRef(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const resizerRef = useRef<HTMLDivElement | null>(null);
@@ -20,13 +22,15 @@ export function App() {
     void settingsGet().then((next) => {
       setSettings(next);
       applySettings(next);
+      setSettingsLoaded(true);
     });
   }, []);
 
   useEffect(() => {
+    if (!settingsLoaded) return;
     applySettings(settings);
     void settingsSet(settings).catch(() => undefined);
-  }, [settings]);
+  }, [settings, settingsLoaded]);
 
   useEffect(() => {
     const load = () => void gatewayStatus().then(setGateway).catch(() => undefined);
@@ -74,22 +78,24 @@ export function App() {
     setSplit(true);
   };
 
+  const titleSession = split && splitSession ? `${activeSessionId} <-> ${splitSession.name}` : activeSessionId;
+
   return (
     <div className="app">
       <div className="titlebar">
         <div className="tb-dots"><span className="tb-dot r"></span><span className="tb-dot y"></span><span className="tb-dot g"></span></div>
-        <div className="tb-title">AgentUI - openclaw - refactor-auth-flow{split && splitSession ? " <-> " + splitSession.name : ""}</div>
+        <div className="tb-title">AgentUI - openclaw - {titleSession}</div>
         <div className="tb-right"><span>Ctrl+K</span></div>
       </div>
       <div className="workspace" ref={wrapRef}>
         <div style={split ? { width: leftW + "%", display: "flex", minWidth: 0 } : { flex: 1, display: "flex", minWidth: 0 }}>
-          <Session onOpenSettings={() => setSettingsOpen(true)} onSplitWith={openSplitWith} splitActive={split} sessionName="refactor-auth-flow" gateway={gateway} />
+          <Session onOpenSettings={() => setSettingsOpen(true)} onSplitWith={openSplitWith} splitActive={split} sessionId={activeSessionId} onSessionSelect={(session) => setActiveSessionId(session.name)} gateway={gateway} settings={settings} />
         </div>
         {split && (
           <>
             <div className="resizer" ref={resizerRef} onMouseDown={() => { dragging.current = true; document.body.style.cursor = "col-resize"; resizerRef.current?.classList.add("dragging"); }}></div>
             <div style={{ width: 100 - leftW + "%", display: "flex", minWidth: 0 }}>
-              <Session onOpenSettings={() => setSettingsOpen(true)} onCloseSplit={() => setSplit(false)} canClose hideSidebar sessionName={splitSession?.name || "new-session"} gateway={gateway} />
+              <Session onOpenSettings={() => setSettingsOpen(true)} onCloseSplit={() => setSplit(false)} canClose hideSidebar sessionId={splitSession?.name || "new-session"} gateway={gateway} settings={settings} />
             </div>
           </>
         )}

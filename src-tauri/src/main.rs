@@ -6,6 +6,7 @@ use commands::{chat_cancel, chat_send, gateway_status, settings_get, settings_se
 use openclaw::{cli::CliOpenclawAdapter, mock::MockOpenclawAdapter};
 use settings::SettingsStore;
 use std::sync::Arc;
+use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()

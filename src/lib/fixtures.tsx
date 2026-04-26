@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accent: "blue",
   font: "jetbrains",
   fontSize: 12,
-  useMock: true,
+  useMock: false,
 };
 
 export const SESSIONS: SessionInfo[] = [

@@ -1,26 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import type { GatewayStatus, Message, SessionInfo } from "../lib/types";
+import type { AppSettings, GatewayStatus, SessionInfo } from "../lib/types";
 import { Chat } from "./Chat";
-import { Composer } from "./Composer";
 import { Icon } from "./Icons";
 import { Sidebar, type NavView } from "./Sidebar";
 import { DiffViewer } from "../panels/DiffViewer";
 import { GatewayStatus as GatewayStatusPanel, StubPanel } from "../panels/GatewayStatus";
 import { Terminal } from "../panels/Terminal";
 
-function nowTime() {
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date());
-}
-
-export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, hideSidebar, sessionName, splitActive, gateway }: {
+export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, hideSidebar, sessionId, onSessionSelect, splitActive, gateway, settings }: {
   onOpenSettings: () => void;
   onSplitWith?: (session: SessionInfo) => void;
   onCloseSplit?: () => void;
   canClose?: boolean;
   hideSidebar?: boolean;
-  sessionName?: string;
+  sessionId: string;
+  onSessionSelect?: (session: SessionInfo) => void;
   splitActive?: boolean;
   gateway: GatewayStatus | null;
+  settings: AppSettings;
 }) {
   const [view, setView] = useState<NavView>("chat");
   const [diffOpen, setDiffOpen] = useState(true);
@@ -29,12 +26,10 @@ export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, h
   const [termHeight, setTermHeight] = useState(220);
   const [diffWidth, setDiffWidth] = useState(380);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [outbound, setOutbound] = useState<Message[]>([]);
   const [error, setError] = useState("");
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const diffDragRef = useRef<HTMLDivElement | null>(null);
   const dragState = useRef({ dragging: false, startX: 0, startW: 0, liveW: diffWidth });
-  const sessionId = sessionName || "refactor-auth-flow";
 
   useEffect(() => {
     const el = diffDragRef.current;
@@ -75,8 +70,7 @@ export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, h
     ? (
       <>
         {error && <div className="error-banner inline">{error}</div>}
-        <Chat sessionId={sessionId} outbound={outbound} />
-        <Composer sessionId={sessionId} onUserMessage={(text) => setOutbound((m) => [...m, { kind: "user", time: nowTime(), text }])} onError={setError} />
+        <Chat sessionId={sessionId} useMock={settings.useMock} onError={setError} />
         {termOpen && termPlacement === "bottom" && <Terminal onClose={() => setTermOpen(false)} placement="bottom" onTogglePlacement={() => setTermPlacement("right")} height={termHeight} onHeightChange={setTermHeight} />}
       </>
     )
@@ -85,11 +79,11 @@ export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, h
 
   return (
     <div className="session">
-      {!hideSidebar && !sidebarCollapsed && <Sidebar onOpenSettings={onOpenSettings} onSplitWith={onSplitWith} splitActive={splitActive} onCollapse={() => setSidebarCollapsed(true)} activeView={view} onViewChange={setView} gateway={gateway} />}
+      {!hideSidebar && !sidebarCollapsed && <Sidebar onOpenSettings={onOpenSettings} onSplitWith={onSplitWith} splitActive={splitActive} onCollapse={() => setSidebarCollapsed(true)} activeView={view} onViewChange={setView} gateway={gateway} activeSessionId={sessionId} onSessionSelect={onSessionSelect} />}
       <div className="main">
         <div className="topbar">
           {!hideSidebar && sidebarCollapsed && <button className="tb-btn icon-only" onClick={() => setSidebarCollapsed(false)} title="Show sidebar"><Icon name="chevRight" size={12} /></button>}
-          <div className="tb-crumb"><span>{sessionName || "refactor-auth-flow"}</span><span className="sep">-</span><span className="agent">openclaw</span></div>
+          <div className="tb-crumb"><span>{sessionId}</span><span className="sep">-</span><span className="agent">openclaw</span></div>
           <div className="tb-status working">agent - working</div>
           <div className="tb-spacer"></div>
           {canClose && <button className="tb-btn" onClick={onCloseSplit} title="Close split"><Icon name="x" size={12} /> close split</button>}

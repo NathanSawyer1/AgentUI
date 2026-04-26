@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MESSAGES } from "../lib/fixtures";
 import { listenChat } from "../lib/openclaw";
 import type { ChatEvent, Message as ChatMessage, ToolBlock } from "../lib/types";
+import { Composer } from "./Composer";
 import { Icon } from "./Icons";
 
 function ToolCard({ block, startOpen = false }: { block: ToolBlock; startOpen?: boolean }) {
@@ -87,14 +88,18 @@ function nowTime() {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date());
 }
 
-export function Chat({ sessionId, outbound }: { sessionId: string; outbound: ChatMessage[] }) {
+export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMock: boolean; onError: (message: string) => void }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [events, setEvents] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  useEffect(() => {
+    setMessages(useMock ? MESSAGES : []);
+  }, [sessionId, useMock]);
 
   useEffect(() => {
     const applyEvent = (event: ChatEvent) => {
       if (event.session_id !== sessionId) return;
-      setEvents((current) => {
+      setMessages((current) => {
         const next = [...current];
         const last = next[next.length - 1];
         const ensureAgent = () => {
@@ -134,13 +139,20 @@ export function Chat({ sessionId, outbound }: { sessionId: string; outbound: Cha
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [events, outbound]);
+  }, [messages]);
+
+  const handleUserMessage = (text: string) => {
+    setMessages((current) => [...current, { kind: "user", time: nowTime(), text }]);
+  };
 
   return (
-    <div className="chat-scroll" ref={scrollRef}>
-      <div className="chat-inner">
-        {[...MESSAGES, ...outbound, ...events].map((m, i) => <Message key={i} msg={m} />)}
+    <>
+      <div className="chat-scroll" ref={scrollRef}>
+        <div className="chat-inner">
+          {messages.map((m, i) => <Message key={m.id ?? i} msg={m} />)}
+        </div>
       </div>
-    </div>
+      <Composer sessionId={sessionId} onUserMessage={handleUserMessage} onError={onError} />
+    </>
   );
 }

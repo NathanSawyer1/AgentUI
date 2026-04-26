@@ -72,6 +72,11 @@ export function SettingsModal({ onClose, settings, onChange }: { onClose: () => 
             )}
             {tab === "openclaw" && (
               <>
+                {!settings.useMock && !settings.openclawPath.trim() && (
+                  <div className="error-banner inline">
+                    PATH lookup is active. If `openclaw` is not on PATH, sends will report: openclaw binary not found on PATH. Set Settings &gt; Openclaw &gt; Binary path or enable the mock adapter.
+                  </div>
+                )}
                 <div className="setting">
                   <div className="setting-label">Binary path</div>
                   <input className="font-select" value={path} placeholder="Use PATH lookup: openclaw" onChange={(e) => setPath(e.target.value)} onBlur={() => onChange({ openclawPath: path })} />
