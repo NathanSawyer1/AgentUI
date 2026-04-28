@@ -167,6 +167,41 @@ impl OpenclawAdapter for CliOpenclawAdapter {
         Ok(())
     }
 
+    fn chat_collect(&self, session: &str, text: &str, options: ChatSendOptions) -> Result<Vec<ChatEvent>> {
+        let agent_session_id = self.resolve_agent_session_id(session);
+        let mut command = self.command()?;
+        command.args(["agent", "--session-id", agent_session_id.as_str(), "--message", text, "--json"]);
+        if let Some(agent_id) = options.agent_id.filter(|v| !v.trim().is_empty()) {
+            command.args(["--agent", agent_id.trim()]);
+        }
+        if let Some(model) = options.model.filter(|v| !v.trim().is_empty()) {
+            command.args(["--model", model.trim()]);
+        }
+        if let Some(thinking) = options.thinking.filter(|v| !v.trim().is_empty()) {
+            command.args(["--thinking", thinking.trim()]);
+        }
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        let output = command.output().context("failed to run `openclaw agent --json`")?;
+        let mut events = Vec::new();
+        if !output.stdout.is_empty() {
+            match serde_json::from_slice::<Value>(&output.stdout).context("failed to parse openclaw agent JSON envelope") {
+                Ok(value) => events.extend(collect_chat_envelope(session, &value)),
+                Err(error) => events.push(ChatEvent::Error { session_id: session.to_string(), error: error.to_string(), message_id: None }),
+            }
+        }
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            events.push(ChatEvent::Error {
+                session_id: session.to_string(),
+                error: if stderr.is_empty() { format!("openclaw agent exited with {}", output.status) } else { stderr },
+                message_id: None,
+            });
+        }
+        events.push(ChatEvent::Done { session_id: session.to_string(), message_id: None });
+        Ok(events)
+    }
+
     fn chat_cancel(&self, session: &str) -> Result<()> {
         if let Some(mut child) = self.children.lock().expect("children mutex poisoned").remove(session) {
             child.kill().context("failed to kill openclaw chat process")?;
@@ -216,6 +251,17 @@ impl OpenclawAdapter for CliOpenclawAdapter {
         let value: Value = serde_json::from_slice(&output.stdout).context("failed to parse chat.history JSON")?;
         Ok(normalize_history_messages(&value))
     }
+}
+
+fn collect_chat_envelope(session_id: &str, value: &Value) -> Vec<ChatEvent> {
+    let events = Arc::new(Mutex::new(Vec::<ChatEvent>::new()));
+    let collected = Arc::clone(&events);
+    let sink: EventSink = Arc::new(move |event| {
+        collected.lock().expect("chat event mutex poisoned").push(event);
+    });
+    emit_chat_envelope(session_id, value, &sink);
+    let result = events.lock().expect("chat event mutex poisoned").clone();
+    result
 }
 
 fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &EventSink) {

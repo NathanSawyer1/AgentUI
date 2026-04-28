@@ -99,6 +99,7 @@ pub type EventSink = Arc<dyn Fn(ChatEvent) + Send + Sync + 'static>;
 pub trait OpenclawAdapter: Send + Sync {
     fn gateway_status(&self) -> Result<GatewayStatus>;
     fn chat(&self, session: &str, text: &str, options: ChatSendOptions, on_event: EventSink) -> Result<()>;
+    fn chat_collect(&self, session: &str, text: &str, options: ChatSendOptions) -> Result<Vec<ChatEvent>>;
     fn chat_cancel(&self, session: &str) -> Result<()>;
     fn models_list(&self) -> Result<Vec<OptionItem>>;
     fn agents_list(&self) -> Result<Vec<OptionItem>>;

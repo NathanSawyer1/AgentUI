@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MESSAGES } from "../lib/fixtures";
 import { listenChat, sessionHistory } from "../lib/openclaw";
 import type { ChatEvent, HistoryMessage, Message as ChatMessage, ToolBlock } from "../lib/types";
@@ -117,46 +117,47 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
     return () => { cancelled = true; };
   }, [sessionId, useMock, onError]);
 
-  useEffect(() => {
-    const applyEvent = (event: ChatEvent) => {
-      if (event.session_id !== sessionId) return;
-      setMessages((current) => {
-        const next = [...current];
+  const applyEvent = useCallback((event: ChatEvent) => {
+    if (event.session_id !== sessionId) return;
+    setMessages((current) => {
+      const next = [...current];
+      const ensureAgent = () => {
         const last = next[next.length - 1];
-        const ensureAgent = () => {
-          if (last?.kind === "agent") return last;
-          const agent: ChatMessage = { kind: "agent", time: nowTime(), blocks: [] };
-          next.push(agent);
-          return agent;
-        };
-        if (event.type === "start") {
-          next.push({ kind: "agent", time: nowTime(), blocks: [{ type: "thinking" }] });
-        } else if (event.type === "token") {
-          const agent = ensureAgent();
-          agent.blocks = agent.blocks.filter((block) => block.type !== "thinking");
-          const tail = agent.blocks[agent.blocks.length - 1];
-          if (tail?.type === "text") tail.content += event.content;
-          else agent.blocks.push({ type: "text", content: event.content });
-        } else if (event.type === "tool") {
-          const agent = ensureAgent();
-          agent.blocks = agent.blocks.filter((block) => block.type !== "thinking");
-          agent.blocks.push(event.block);
-        } else if (event.type === "error") {
-          const agent = ensureAgent();
-          agent.blocks = [{ type: "text", content: event.error }];
-        } else if (event.type === "done") {
-          const agent = ensureAgent();
-          agent.blocks = agent.blocks.filter((block) => block.type !== "thinking");
-        }
-        return next;
-      });
-    };
+        if (last?.kind === "agent") return last;
+        const agent: ChatMessage = { kind: "agent", time: nowTime(), blocks: [] };
+        next.push(agent);
+        return agent;
+      };
+      if (event.type === "start") {
+        next.push({ kind: "agent", time: nowTime(), blocks: [{ type: "thinking" }] });
+      } else if (event.type === "token") {
+        const agent = ensureAgent();
+        agent.blocks = agent.blocks.filter((block) => block.type !== "thinking");
+        const tail = agent.blocks[agent.blocks.length - 1];
+        if (tail?.type === "text") tail.content += event.content;
+        else agent.blocks.push({ type: "text", content: event.content });
+      } else if (event.type === "tool") {
+        const agent = ensureAgent();
+        agent.blocks = agent.blocks.filter((block) => block.type !== "thinking");
+        agent.blocks.push(event.block);
+      } else if (event.type === "error") {
+        const agent = ensureAgent();
+        agent.blocks = [{ type: "text", content: event.error }];
+      } else if (event.type === "done") {
+        const agent = ensureAgent();
+        agent.blocks = agent.blocks.filter((block) => block.type !== "thinking");
+      }
+      return next;
+    });
+  }, [sessionId]);
+
+  useEffect(() => {
     let cleanup: (() => void) | undefined;
     void listenChat(applyEvent).then((unlisten) => {
       cleanup = unlisten;
-    });
+    }).catch((error) => onError(error instanceof Error ? error.message : String(error)));
     return () => cleanup?.();
-  }, [sessionId]);
+  }, [applyEvent, onError]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -173,7 +174,7 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
           {messages.map((m, i) => <Message key={m.id ?? i} msg={m} />)}
         </div>
       </div>
-      <Composer sessionId={sessionId} onUserMessage={handleUserMessage} onError={onError} />
+      <Composer sessionId={sessionId} onUserMessage={handleUserMessage} onChatEvents={(events) => events.forEach(applyEvent)} onError={onError} />
     </>
   );
 }

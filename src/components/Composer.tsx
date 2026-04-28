@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { PERMS } from "../lib/perms";
 import { agentsList, chatSend, modelsList } from "../lib/openclaw";
-import type { ChatSendOptions, OptionItem } from "../lib/types";
+import type { ChatEvent, ChatSendOptions, OptionItem } from "../lib/types";
 import { Icon } from "./Icons";
 
 function Dropdown({ open, onClose, children, align = "left" }: { open: boolean; onClose: () => void; children: React.ReactNode; align?: "left" | "right" }) {
@@ -36,7 +36,7 @@ const DEFAULT_AGENTS: OptionItem[] = [
   { id: "main", name: "main", meta: "default", desc: "Primary OpenClaw agent", active: true },
 ];
 
-export function Composer({ sessionId, onUserMessage, onError }: { sessionId: string; onUserMessage: (text: string) => void; onError: (message: string) => void }) {
+export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { sessionId: string; onUserMessage: (text: string) => void; onChatEvents: (events: ChatEvent[]) => void; onError: (message: string) => void }) {
   const [text, setText] = useState("");
   const [models, setModels] = useState<OptionItem[]>(DEFAULT_MODELS);
   const [agents, setAgents] = useState<OptionItem[]>(DEFAULT_AGENTS);
@@ -83,10 +83,14 @@ export function Composer({ sessionId, onUserMessage, onError }: { sessionId: str
     setAttached([]);
     if (textRef.current) textRef.current.style.height = "auto";
     onUserMessage(outgoing);
+    onChatEvents([{ type: "start", session_id: sessionId }]);
     try {
-      await chatSend(sessionId, outgoing, { agentId, model: model || undefined, thinking, permission: perm });
+      const events = await chatSend(sessionId, outgoing, { agentId, model: model || undefined, thinking, permission: perm });
+      onChatEvents(events);
     } catch (error) {
-      onError(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      onChatEvents([{ type: "error", session_id: sessionId, error: message }, { type: "done", session_id: sessionId }]);
+      onError(message);
     }
   };
 
