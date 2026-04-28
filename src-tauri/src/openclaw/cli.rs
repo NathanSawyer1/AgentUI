@@ -55,6 +55,28 @@ impl CliOpenclawAdapter {
         }
         serde_json::from_slice(&output.stdout).with_context(|| format!("failed to parse `openclaw {}` JSON", args.join(" ")))
     }
+
+    fn resolve_agent_session_id(&self, session: &str) -> String {
+        let Ok(value) = self.run_json(&["sessions", "--json", "--all-agents"]) else {
+            return session.to_string();
+        };
+        value
+            .get("sessions")
+            .or_else(|| value.get("items"))
+            .or_else(|| value.get("data"))
+            .and_then(Value::as_array)
+            .and_then(|items| {
+                items.iter().find_map(|item| {
+                    let key = item.get("key").or_else(|| item.get("id")).and_then(Value::as_str)?;
+                    if key == session {
+                        item.get("sessionId").or_else(|| item.get("session_id")).and_then(Value::as_str).map(str::to_string)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or_else(|| session.to_string())
+    }
 }
 
 impl OpenclawAdapter for CliOpenclawAdapter {
@@ -64,8 +86,9 @@ impl OpenclawAdapter for CliOpenclawAdapter {
     }
 
     fn chat(&self, session: &str, text: &str, options: ChatSendOptions, on_event: EventSink) -> Result<()> {
+        let agent_session_id = self.resolve_agent_session_id(session);
         let mut command = self.command()?;
-        command.args(["agent", "--session-id", session, "--message", text, "--json"]);
+        command.args(["agent", "--session-id", agent_session_id.as_str(), "--message", text, "--json"]);
         if let Some(agent_id) = options.agent_id.filter(|v| !v.trim().is_empty()) {
             command.args(["--agent", agent_id.trim()]);
         }
