@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MESSAGES } from "../lib/fixtures";
-import { listenChat } from "../lib/openclaw";
-import type { ChatEvent, Message as ChatMessage, ToolBlock } from "../lib/types";
+import { listenChat, sessionHistory } from "../lib/openclaw";
+import type { ChatEvent, HistoryMessage, Message as ChatMessage, ToolBlock } from "../lib/types";
 import { Composer } from "./Composer";
 import { Icon } from "./Icons";
 
@@ -88,13 +88,34 @@ function nowTime() {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date());
 }
 
+function historyTime(timestamp?: number) {
+  if (!timestamp) return "";
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp));
+}
+
+function mapHistoryMessage(message: HistoryMessage, index: number): ChatMessage {
+  const time = historyTime(message.timestamp) || "history";
+  if (message.role === "user") return { id: message.id ?? `history-user-${index}`, kind: "user", time, text: message.text };
+  return { id: message.id ?? `history-agent-${index}`, kind: "agent", time, blocks: [{ type: "text", content: message.text }] };
+}
+
 export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMock: boolean; onError: (message: string) => void }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     setMessages(useMock ? MESSAGES : []);
-  }, [sessionId, useMock]);
+    if (useMock) return () => { cancelled = true; };
+    void sessionHistory(sessionId, 1000)
+      .then((history) => {
+        if (!cancelled) setMessages(history.map(mapHistoryMessage));
+      })
+      .catch((error) => {
+        if (!cancelled) onError(error instanceof Error ? error.message : String(error));
+      });
+    return () => { cancelled = true; };
+  }, [sessionId, useMock, onError]);
 
   useEffect(() => {
     const applyEvent = (event: ChatEvent) => {

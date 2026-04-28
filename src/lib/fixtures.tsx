@@ -24,13 +24,6 @@ export const MODELS: OptionItem[] = [
   { id: "gpt5", name: "GPT-5", meta: "openai", desc: "Alternative provider via gateway." },
 ];
 
-export const PERMS: OptionItem[] = [
-  { id: "ask", name: "Ask every time", meta: "safe", desc: "Confirm before any file edit or command." },
-  { id: "edit", name: "Edit files freely", meta: "default", desc: "Auto-approve file edits. Confirm commands.", active: true },
-  { id: "shell", name: "Edit + run shell", meta: "auto", desc: "Auto-approve edits and shell commands." },
-  { id: "full", name: "Full autonomy", meta: "yolo", desc: "No prompts. Use only in sandboxed worktrees." },
-];
-
 export const MESSAGES: Message[] = [
   { kind: "user", time: "11:42", text: "Hey - can you look at the rate limiter in `api/middleware/ratelimit.ts`? I'm seeing it let through bursts after an idle period." },
   {
@@ -66,10 +59,10 @@ export const DIFF_FILES: DiffFile[] = [
 
 export const DIFF_ROWS: DiffRow[] = [
   { type: "hunk", label: "@@ class TokenBucket - take(n = 1) @@" },
-  { old: { ln: 8, code: <>  <span className="tk-kw">const</span> now = <span className="tk-fn">Date</span>.<span className="tk-fn">now</span>()</>, kind: "ctx" }, nw: { ln: 8, code: <>  <span className="tk-kw">const</span> now = <span className="tk-fn">Date</span>.<span className="tk-fn">now</span>()</>, kind: "ctx" } },
-  { old: { ln: 9, code: <>  <span className="tk-kw">const</span> delta = (now - <span className="tk-kw">this</span>.last) / <span className="tk-nu">1000</span></>, kind: "ctx" }, nw: { ln: 9, code: <>  <span className="tk-kw">const</span> delta = (now - <span className="tk-kw">this</span>.last) / <span className="tk-nu">1000</span></>, kind: "ctx" } },
-  { old: { ln: 10, code: <>  <span className="tk-kw">this</span>.tokens += delta * <span className="tk-kw">this</span>.rate</>, kind: "del" }, nw: { ln: 10, code: <>  <span className="tk-kw">this</span>.tokens = <span className="tk-fn">Math</span>.<span className="tk-fn">min</span>(<span className="tk-kw">this</span>.capacity, <span className="tk-kw">this</span>.tokens + delta * <span className="tk-kw">this</span>.rate)</>, kind: "add" } },
-  { old: { ln: 11, code: <>  <span className="tk-kw">this</span>.last = now</>, kind: "ctx" }, nw: { ln: 11, code: <>  <span className="tk-kw">this</span>.last = now</>, kind: "ctx" } },
+  { old: { ln: 8, code: "  const now = Date.now()", kind: "ctx" }, nw: { ln: 8, code: "  const now = Date.now()", kind: "ctx" } },
+  { old: { ln: 9, code: "  const delta = (now - this.last) / 1000", kind: "ctx" }, nw: { ln: 9, code: "  const delta = (now - this.last) / 1000", kind: "ctx" } },
+  { old: { ln: 10, code: "  this.tokens += delta * this.rate", kind: "del" }, nw: { ln: 10, code: "  this.tokens = Math.min(this.capacity, this.tokens + delta * this.rate)", kind: "add" } },
+  { old: { ln: 11, code: "  this.last = now", kind: "ctx" }, nw: { ln: 11, code: "  this.last = now", kind: "ctx" } },
 ];
 
 export const TERM_LINES: TermLine[] = [

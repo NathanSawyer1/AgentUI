@@ -7,13 +7,19 @@ import { DiffViewer } from "../panels/DiffViewer";
 import { GatewayStatus as GatewayStatusPanel, StubPanel } from "../panels/GatewayStatus";
 import { Terminal } from "../panels/Terminal";
 
-export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, hideSidebar, sessionId, onSessionSelect, splitActive, gateway, settings }: {
+export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, hideSidebar, sessionId, sessions, sessionAliases, pinnedSessionIds, onNewSession, onRenameSession, onTogglePinSession, onSessionSelect, splitActive, gateway, settings }: {
   onOpenSettings: () => void;
   onSplitWith?: (session: SessionInfo) => void;
   onCloseSplit?: () => void;
   canClose?: boolean;
   hideSidebar?: boolean;
   sessionId: string;
+  sessions: SessionInfo[];
+  sessionAliases: Record<string, string>;
+  pinnedSessionIds: string[];
+  onNewSession?: () => void;
+  onRenameSession?: (sessionId: string, name: string) => void;
+  onTogglePinSession?: (sessionId: string) => void;
   onSessionSelect?: (session: SessionInfo) => void;
   splitActive?: boolean;
   gateway: GatewayStatus | null;
@@ -79,7 +85,7 @@ export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, h
 
   return (
     <div className="session">
-      {!hideSidebar && !sidebarCollapsed && <Sidebar onOpenSettings={onOpenSettings} onSplitWith={onSplitWith} splitActive={splitActive} onCollapse={() => setSidebarCollapsed(true)} activeView={view} onViewChange={setView} gateway={gateway} activeSessionId={sessionId} onSessionSelect={onSessionSelect} />}
+      {!hideSidebar && !sidebarCollapsed && <Sidebar onOpenSettings={onOpenSettings} onSplitWith={onSplitWith} splitActive={splitActive} onCollapse={() => setSidebarCollapsed(true)} activeView={view} onViewChange={setView} gateway={gateway} activeSessionId={sessionId} sessions={sessions} sessionAliases={sessionAliases} pinnedSessionIds={pinnedSessionIds} onNewSession={onNewSession} onRenameSession={onRenameSession} onTogglePinSession={onTogglePinSession} onSessionSelect={onSessionSelect} />}
       <div className="main">
         <div className="topbar">
           {!hideSidebar && sidebarCollapsed && <button className="tb-btn icon-only" onClick={() => setSidebarCollapsed(false)} title="Show sidebar"><Icon name="chevRight" size={12} /></button>}

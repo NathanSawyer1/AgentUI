@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 export type SessionStatus = "working" | "idle" | "ok" | "err";
 
 export interface SessionInfo {
@@ -8,6 +6,8 @@ export interface SessionInfo {
   status: SessionStatus;
   time: string;
   active?: boolean;
+  ageMs?: number;
+  updatedAt?: string;
 }
 
 export interface OptionItem {
@@ -16,6 +16,13 @@ export interface OptionItem {
   meta: string;
   desc: string;
   active?: boolean;
+}
+
+export interface ChatSendOptions {
+  agentId?: string;
+  model?: string;
+  thinking?: "off" | "minimal" | "low" | "medium" | "high";
+  permission?: string;
 }
 
 export interface PreviewLine {
@@ -58,6 +65,13 @@ export interface AgentMessage {
 
 export type Message = UserMessage | AgentMessage;
 
+export interface HistoryMessage {
+  id?: string;
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: number;
+}
+
 export interface DiffFile {
   path: string;
   adds: number;
@@ -67,7 +81,7 @@ export interface DiffFile {
 
 export interface DiffCell {
   ln: number;
-  code: ReactNode;
+  code: string;
   kind: "ctx" | "add" | "del";
 }
 

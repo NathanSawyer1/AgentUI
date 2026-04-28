@@ -1,9 +1,9 @@
 use crate::{
-    openclaw::{cli::CliOpenclawAdapter, mock::MockOpenclawAdapter, ChatEvent, GatewayStatus, OpenclawAdapter},
+    openclaw::{cli::CliOpenclawAdapter, mock::MockOpenclawAdapter, ChatEvent, ChatSendOptions, GatewayStatus, HistoryMessage, OpenclawAdapter, OptionItem, SessionInfo},
     settings::{AppSettings, SettingsStore},
 };
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
     pub settings: Arc<SettingsStore>,
@@ -24,21 +24,85 @@ impl AppState {
 }
 
 #[tauri::command]
-pub fn gateway_status(state: State<AppState>) -> Result<GatewayStatus, String> {
-    state.adapter().gateway_status().map_err(|e| e.to_string())
+pub async fn gateway_status(state: State<'_, AppState>) -> Result<GatewayStatus, String> {
+    let adapter = state.adapter();
+    tauri::async_runtime::spawn_blocking(move || adapter.gateway_status().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn chat_send(app: AppHandle, state: State<AppState>, session_id: String, text: String) -> Result<(), String> {
+pub fn chat_send(app: AppHandle, state: State<AppState>, session_id: String, text: String, options: Option<ChatSendOptions>) -> Result<(), String> {
     let sink = Arc::new(move |event: ChatEvent| {
         let _ = app.emit("openclaw:chat", event);
     });
-    state.adapter().chat(&session_id, &text, sink).map_err(|e| e.to_string())
+    state.adapter().chat(&session_id, &text, options.unwrap_or_default(), sink).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn chat_cancel(state: State<AppState>, session_id: String) -> Result<(), String> {
     state.adapter().chat_cancel(&session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn models_list(state: State<'_, AppState>) -> Result<Vec<OptionItem>, String> {
+    let adapter = state.adapter();
+    tauri::async_runtime::spawn_blocking(move || adapter.models_list().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn agents_list(state: State<'_, AppState>) -> Result<Vec<OptionItem>, String> {
+    let adapter = state.adapter();
+    tauri::async_runtime::spawn_blocking(move || adapter.agents_list().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn sessions_list(state: State<'_, AppState>) -> Result<Vec<SessionInfo>, String> {
+    let adapter = state.adapter();
+    tauri::async_runtime::spawn_blocking(move || adapter.sessions_list().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn session_history(state: State<'_, AppState>, session_id: String, limit: Option<usize>) -> Result<Vec<HistoryMessage>, String> {
+    let adapter = state.adapter();
+    tauri::async_runtime::spawn_blocking(move || adapter.session_history(&session_id, limit.unwrap_or(1000)).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    app.get_webview_window("main").ok_or_else(|| "main window not found".to_string())
+}
+
+#[tauri::command]
+pub fn window_start_dragging(app: AppHandle) -> Result<(), String> {
+    main_window(&app)?.start_dragging().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn window_minimize(app: AppHandle) -> Result<(), String> {
+    main_window(&app)?.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn window_toggle_maximize(app: AppHandle) -> Result<(), String> {
+    let window = main_window(&app)?;
+    if window.is_maximized().map_err(|e| e.to_string())? {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+pub fn window_close(app: AppHandle) -> Result<(), String> {
+    main_window(&app)?.close().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

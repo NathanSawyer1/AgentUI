@@ -2,7 +2,7 @@ mod commands;
 mod openclaw;
 mod settings;
 
-use commands::{chat_cancel, chat_send, gateway_status, settings_get, settings_set, AppState};
+use commands::{agents_list, chat_cancel, chat_send, gateway_status, models_list, session_history, sessions_list, settings_get, settings_set, window_close, window_minimize, window_start_dragging, window_toggle_maximize, AppState};
 use openclaw::{cli::CliOpenclawAdapter, mock::MockOpenclawAdapter};
 use settings::SettingsStore;
 use std::sync::Arc;
@@ -24,6 +24,14 @@ fn main() {
             gateway_status,
             chat_send,
             chat_cancel,
+            models_list,
+            agents_list,
+            sessions_list,
+            session_history,
+            window_start_dragging,
+            window_minimize,
+            window_toggle_maximize,
+            window_close,
             settings_get,
             settings_set
         ])
