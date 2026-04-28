@@ -93,16 +93,13 @@ impl OpenclawAdapter for CliOpenclawAdapter {
             children.lock().expect("children mutex poisoned").insert(session_id.clone(), child);
             on_event(ChatEvent::Start { session_id: session_id.clone(), message_id: None });
 
-            let stderr_session_id = session_id.clone();
-            let stderr_sink = Arc::clone(&on_event);
+            let stderr_text = Arc::new(Mutex::new(String::new()));
+            let stderr_capture = Arc::clone(&stderr_text);
             let stderr_thread = stderr.map(|mut stderr| {
                 thread::spawn(move || {
                     let mut text = String::new();
                     let _ = stderr.read_to_string(&mut text);
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        stderr_sink(ChatEvent::Error { session_id: stderr_session_id, error: trimmed.to_string(), message_id: None });
-                    }
+                    *stderr_capture.lock().expect("stderr mutex poisoned") = text;
                 })
             });
 
@@ -119,15 +116,28 @@ impl OpenclawAdapter for CliOpenclawAdapter {
                 }
             }
 
+            let mut command_failed = false;
             if let Some(mut child) = children.lock().expect("children mutex poisoned").remove(&session_id) {
                 match child.wait() {
                     Ok(status) if status.success() => {}
-                    Ok(status) => on_event(ChatEvent::Error { session_id: session_id.clone(), error: format!("openclaw agent exited with {status}"), message_id: None }),
-                    Err(error) => on_event(ChatEvent::Error { session_id: session_id.clone(), error: error.to_string(), message_id: None }),
+                    Ok(status) => {
+                        command_failed = true;
+                        on_event(ChatEvent::Error { session_id: session_id.clone(), error: format!("openclaw agent exited with {status}"), message_id: None });
+                    }
+                    Err(error) => {
+                        command_failed = true;
+                        on_event(ChatEvent::Error { session_id: session_id.clone(), error: error.to_string(), message_id: None });
+                    }
                 }
             }
             if let Some(handle) = stderr_thread {
                 let _ = handle.join();
+            }
+            if command_failed {
+                let stderr = stderr_text.lock().expect("stderr mutex poisoned").trim().to_string();
+                if !stderr.is_empty() {
+                    on_event(ChatEvent::Error { session_id: session_id.clone(), error: stderr, message_id: None });
+                }
             }
             on_event(ChatEvent::Done { session_id, message_id: None });
         });
@@ -186,8 +196,16 @@ impl OpenclawAdapter for CliOpenclawAdapter {
 }
 
 fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &EventSink) {
-    if let Some(events) = normalize_chat_event(session_id, value) {
+    if let Some(error) = value.get("error").or_else(|| value.pointer("/result/error")).and_then(Value::as_str) {
+        on_event(ChatEvent::Error { session_id: session_id.to_string(), error: error.to_string(), message_id: read_message_id(value) });
+        return;
+    }
+
+    let payload_root = value.get("result").unwrap_or(value);
+    let mut emitted_content = false;
+    if let Some(events) = normalize_chat_event(session_id, payload_root) {
         for event in events {
+            emitted_content = true;
             if matches!(event, ChatEvent::Token { .. }) {
                 thread::sleep(Duration::from_millis(20));
             }
@@ -195,8 +213,13 @@ fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &EventSink) {
         }
     }
 
-    for tool in value.pointer("/meta/tools").and_then(Value::as_array).into_iter().flatten() {
+    for tool in payload_root.pointer("/meta/tools").and_then(Value::as_array).into_iter().flatten() {
+        emitted_content = true;
         on_event(ChatEvent::Tool { session_id: session_id.to_string(), block: tool_block_from_event(tool), message_id: read_message_id(value) });
+    }
+
+    if !emitted_content {
+        on_event(ChatEvent::Error { session_id: session_id.to_string(), error: "openclaw agent returned no displayable content".into(), message_id: read_message_id(value) });
     }
 }
 
