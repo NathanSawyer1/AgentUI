@@ -36,6 +36,12 @@ const DEFAULT_AGENTS: OptionItem[] = [
   { id: "main", name: "main", meta: "default", desc: "Primary OpenClaw agent", active: true },
 ];
 
+const SUGGESTIONS = [
+  "Run the test suite",
+  "Open a PR with these changes",
+  "Explain the token bucket",
+];
+
 export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { sessionId: string; onUserMessage: (text: string) => void; onChatEvents: (events: ChatEvent[]) => void; onError: (message: string) => void }) {
   const [text, setText] = useState("");
   const [models, setModels] = useState<OptionItem[]>(DEFAULT_MODELS);
@@ -83,10 +89,8 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
     setAttached([]);
     if (textRef.current) textRef.current.style.height = "auto";
     onUserMessage(outgoing);
-    onChatEvents([{ type: "start", session_id: sessionId }]);
     try {
-      const events = await chatSend(sessionId, outgoing, { agentId, model: model || undefined, thinking, permission: perm });
-      onChatEvents(events);
+      await chatSend(sessionId, outgoing, { agentId, model: model || undefined, thinking, permission: perm });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       onChatEvents([{ type: "error", session_id: sessionId, error: message }, { type: "done", session_id: sessionId }]);
@@ -99,13 +103,26 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
     el.style.height = Math.min(160, el.scrollHeight) + "px";
   };
 
+  const useSuggestion = (suggestion: string) => {
+    setText(suggestion);
+    window.requestAnimationFrame(() => {
+      if (!textRef.current) return;
+      textRef.current.focus();
+      textRef.current.selectionStart = suggestion.length;
+      textRef.current.selectionEnd = suggestion.length;
+      resize(textRef.current);
+    });
+  };
+
   return (
     <div className="composer-wrap">
       <div className="composer-inner">
         <div className="suggestions">
-          <div className="suggestion">Run the test suite</div>
-          <div className="suggestion">Open a PR with these changes</div>
-          <div className="suggestion">Explain the token bucket</div>
+          {SUGGESTIONS.map((suggestion) => (
+            <button key={suggestion} type="button" className="suggestion" onClick={() => useSuggestion(suggestion)}>
+              {suggestion}
+            </button>
+          ))}
         </div>
         <div className="composer">
           {attached.length > 0 && (

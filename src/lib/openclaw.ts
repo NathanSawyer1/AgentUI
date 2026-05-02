@@ -10,9 +10,9 @@ export async function gatewayStatus(): Promise<GatewayStatus> {
   return invoke<GatewayStatus>("gateway_status");
 }
 
-export async function chatSend(sessionId: string, text: string, options: ChatSendOptions = {}): Promise<ChatEvent[]> {
-  if (!inTauri()) return [];
-  return invoke<ChatEvent[]>("chat_send", { sessionId, text, options });
+export async function chatSend(sessionId: string, text: string, options: ChatSendOptions = {}): Promise<void> {
+  if (!inTauri()) return;
+  return invoke("chat_send", { sessionId, text, options });
 }
 
 export async function chatCancel(sessionId: string): Promise<void> {

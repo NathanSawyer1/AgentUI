@@ -25,6 +25,7 @@
     "active": true,
     "targets": ["deb", "appimage"],
     "category": "DeveloperTool",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
     "shortDescription": "Desktop UI for openclaw",
     "longDescription": "AgentUI is a Linux desktop shell for the locally installed openclaw CLI."
   }

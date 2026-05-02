@@ -56,25 +56,6 @@ impl OpenclawAdapter for MockOpenclawAdapter {
         Ok(())
     }
 
-    fn chat_collect(&self, session: &str, text: &str, _options: ChatSendOptions) -> Result<Vec<ChatEvent>> {
-        let answer = format!("Mock openclaw received `{}`. Streaming is wired through Tauri events, so the real CLI can now replace this adapter.", text);
-        Ok(vec![
-            ChatEvent::Token { session_id: session.to_string(), content: answer, message_id: None },
-            ChatEvent::Tool {
-                session_id: session.to_string(),
-                message_id: None,
-                block: ToolBlock {
-                    block_type: "tool".into(),
-                    name: "mock_gateway".into(),
-                    arg: "openclaw agent --json".into(),
-                    status: "ok".into(),
-                    preview: vec![super::PreviewLine { c: Some("muted".into()), t: "OPENCLAW_MOCK=1".into() }],
-                },
-            },
-            ChatEvent::Done { session_id: session.to_string(), message_id: None },
-        ])
-    }
-
     fn chat_cancel(&self, _session: &str) -> Result<()> {
         Ok(())
     }

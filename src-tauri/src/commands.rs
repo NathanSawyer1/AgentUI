@@ -1,9 +1,12 @@
 use crate::{
-    openclaw::{cli::CliOpenclawAdapter, mock::MockOpenclawAdapter, ChatEvent, ChatSendOptions, GatewayStatus, HistoryMessage, OpenclawAdapter, OptionItem, SessionInfo},
+    openclaw::{
+        cli::CliOpenclawAdapter, mock::MockOpenclawAdapter, ChatEvent, ChatSendOptions,
+        GatewayStatus, HistoryMessage, OpenclawAdapter, OptionItem, SessionInfo,
+    },
     settings::{AppSettings, SettingsStore},
 };
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
     pub settings: Arc<SettingsStore>,
@@ -32,11 +35,25 @@ pub async fn gateway_status(state: State<'_, AppState>) -> Result<GatewayStatus,
 }
 
 #[tauri::command]
-pub async fn chat_send(_app: AppHandle, state: State<'_, AppState>, session_id: String, text: String, options: Option<ChatSendOptions>) -> Result<Vec<ChatEvent>, String> {
+pub async fn chat_send(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    text: String,
+    options: Option<ChatSendOptions>,
+) -> Result<(), String> {
     let adapter = state.adapter();
-    tauri::async_runtime::spawn_blocking(move || adapter.chat_collect(&session_id, &text, options.unwrap_or_default()).map_err(|e| e.to_string()))
-        .await
-        .map_err(|e| e.to_string())?
+    let sink_app = app.clone();
+    let sink = Arc::new(move |event: ChatEvent| {
+        let _ = sink_app.emit("openclaw:chat", event);
+    });
+    tauri::async_runtime::spawn_blocking(move || {
+        adapter
+            .chat(&session_id, &text, options.unwrap_or_default(), sink)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

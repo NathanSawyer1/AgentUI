@@ -945,6 +945,7 @@ input, textarea {
   margin-bottom: 8px;
 }
 .suggestion {
+  appearance: none;
   padding: 4px 10px;
   background: var(--bg-2);
   border: 1px solid var(--line);
