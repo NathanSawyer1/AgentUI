@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Allow the main AgentUI window to invoke app commands, listen for app events, and use custom titlebar controls.",
-  "windows": ["main"],
+  "description": "Allow AgentUI windows to invoke app commands, listen for app events, and use custom titlebar controls.",
+  "windows": ["main", "session-popout-*"],
   "local": true,
   "remote": {
     "urls": ["http://localhost:1420"]

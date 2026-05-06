@@ -18,6 +18,7 @@ export function Icon({ name, size = 14, stroke = 1.6 }: IconProps) {
   const paths: Record<string, JSX.Element> = {
     plus: <><path d="M12 5v14M5 12h14" /></>,
     arrowUp: <><path d="M12 19V5M5 12l7-7 7 7" /></>,
+    chevUp: <><path d="M18 15l-6-6-6 6" /></>,
     chevDown: <><path d="M6 9l6 6 6-6" /></>,
     chevRight: <><path d="M9 6l6 6-6 6" /></>,
     chevLeft: <><path d="M15 6l-6 6 6 6" /></>,
@@ -26,6 +27,7 @@ export function Icon({ name, size = 14, stroke = 1.6 }: IconProps) {
     diff: <><path d="M8 3h10v10M18 3l-7 7M16 21H6V11M6 21l7-7" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.8-.3 1.6 1.6 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.6 1.6 0 00-1-1.5 1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.8 1.6 1.6 0 00-1.5-1H3a2 2 0 010-4h.1a1.6 1.6 0 001.5-1 1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.8.3H9a1.6 1.6 0 001-1.5V3a2 2 0 014 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8V9a1.6 1.6 0 001.5 1H21a2 2 0 010 4h-.1a1.6 1.6 0 00-1.5 1z" /></>,
     split: <><rect x="3" y="3" width="18" height="18" rx="1" /><path d="M12 3v18" /></>,
+    popout: <><rect x="5" y="7" width="12" height="12" rx="1" /><path d="M12 5h7v7M19 5l-8 8" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></>,
     file: <><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" /></>,
     folder: <><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></>,

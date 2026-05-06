@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import type { GatewayStatus, SessionInfo } from "../lib/types";
 import { Icon } from "./Icons";
 
-export type NavView = "chat" | "gateway" | "skills" | "plugins" | "logs";
+export type NavView = "chat" | "gateway" | "skills" | "plugins" | "logs" | "doctor";
 
 type SessionAliases = Record<string, string>;
 
-export function Sidebar({ onOpenSettings, onSplitWith, splitActive, onCollapse, activeView, onViewChange, gateway, activeSessionId, sessions, sessionAliases, pinnedSessionIds, onNewSession, onRenameSession, onTogglePinSession, onSessionSelect }: {
+export function Sidebar({ onOpenSettings, onSplitWith, onPopoutSession, splitActive, onCollapse, activeView, onViewChange, gateway, activeSessionId, sessions, sessionAliases, pinnedSessionIds, onNewSession, onRenameSession, onTogglePinSession, onSessionSelect }: {
   onOpenSettings: () => void;
   onSplitWith?: (session: SessionInfo) => void;
+  onPopoutSession?: (session: SessionInfo) => void;
   splitActive?: boolean;
   onCollapse?: () => void;
   activeView: NavView;
@@ -94,18 +95,20 @@ export function Sidebar({ onOpenSettings, onSplitWith, splitActive, onCollapse, 
           <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
             <div className="ctx-head">{displaySessionName(menu.session, sessionAliases)}</div>
             <div className="ctx-item" onClick={() => { onSessionSelect?.(menu.session); setMenu(null); onViewChange("chat"); }}><Icon name="eye" size={11} /> Open session</div>
+            <div className="ctx-item" onClick={() => { onPopoutSession?.(menu.session); setMenu(null); }}><Icon name="popout" size={11} /> Pop out session</div>
             <div className={"ctx-item" + (splitActive ? " disabled" : "")} onClick={() => { if (!splitActive) onSplitWith?.(menu.session); setMenu(null); }}><Icon name="split" size={11} /> Split session here<span className="ctx-kbd">Ctrl+Shift+S</span></div>
             <div className="ctx-sep"></div>
             <div className="ctx-item" onClick={() => { onTogglePinSession?.(menu.session.id); setMenu(null); }}><Icon name="pin" size={11} /> {pinnedSet.has(menu.session.id) ? "Unpin session" : "Pin session"}</div>
             <div className="ctx-item" onClick={renameFromMenu}><Icon name="file" size={11} /> Rename</div>
-            <div className="ctx-item danger"><Icon name="x" size={11} /> Archive</div>
+            <div className="ctx-item disabled" title="Unavailable until OpenClaw exposes sessions archive support"><Icon name="folder" size={11} /> Archive unavailable</div>
           </div>
         )}
         <div className="sb-sep"></div>
-        {nav("gateway", "layers", "Gateway Overview")}
         {nav("skills", "tool", "Skills")}
         {nav("plugins", "plug", "Plugins")}
         {nav("logs", "list", "Logs")}
+        {nav("doctor", "cpu", "Doctor")}
+        {nav("gateway", "layers", "Gateway Overview")}
         <div className="heartbeat">
           <div className="hb-head">
             <div className="hb-title">Heartbeat</div>

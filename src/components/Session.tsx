@@ -3,13 +3,18 @@ import type { AppSettings, GatewayStatus, SessionInfo } from "../lib/types";
 import { Chat } from "./Chat";
 import { Icon } from "./Icons";
 import { Sidebar, type NavView } from "./Sidebar";
+import { GatewayStatus as GatewayStatusPanel } from "../panels/GatewayStatus";
+import { Skills } from "../panels/Skills";
+import { Plugins } from "../panels/Plugins";
+import { Logs } from "../panels/Logs";
+import { Doctor } from "../panels/Doctor";
 import { DiffViewer } from "../panels/DiffViewer";
-import { GatewayStatus as GatewayStatusPanel, StubPanel } from "../panels/GatewayStatus";
 import { Terminal } from "../panels/Terminal";
 
-export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, hideSidebar, sessionId, sessions, sessionAliases, pinnedSessionIds, onNewSession, onRenameSession, onTogglePinSession, onSessionSelect, splitActive, gateway, settings }: {
+export function Session({ onOpenSettings, onSplitWith, onPopoutSession, onCloseSplit, canClose, hideSidebar, sessionId, sessions, sessionAliases, pinnedSessionIds, onNewSession, onRenameSession, onTogglePinSession, onSessionSelect, splitActive, gateway, settings }: {
   onOpenSettings: () => void;
   onSplitWith?: (session: SessionInfo) => void;
+  onPopoutSession?: (session: SessionInfo) => void;
   onCloseSplit?: () => void;
   canClose?: boolean;
   hideSidebar?: boolean;
@@ -26,84 +31,73 @@ export function Session({ onOpenSettings, onSplitWith, onCloseSplit, canClose, h
   settings: AppSettings;
 }) {
   const [view, setView] = useState<NavView>("chat");
-  const [diffOpen, setDiffOpen] = useState(true);
-  const [termOpen, setTermOpen] = useState(false);
-  const [termPlacement, setTermPlacement] = useState<"right" | "bottom">("right");
-  const [termHeight, setTermHeight] = useState(220);
-  const [diffWidth, setDiffWidth] = useState(380);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [error, setError] = useState("");
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [sideWidth, setSideWidth] = useState(38);
+  const [terminalPlacement, setTerminalPlacement] = useState<"right" | "bottom">("bottom");
+  const [terminalHeight, setTerminalHeight] = useState(230);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const diffDragRef = useRef<HTMLDivElement | null>(null);
-  const dragState = useRef({ dragging: false, startX: 0, startW: 0, liveW: diffWidth });
+  const sideDrag = useRef(false);
+  const currentSession = sessions.find((session) => session.id === sessionId || session.name === sessionId) || { id: sessionId, name: sessionAliases[sessionId] || sessionId, status: "idle" as const, time: "" };
 
   useEffect(() => {
-    const el = diffDragRef.current;
-    if (!el) return;
-    const down = (e: MouseEvent) => {
-      dragState.current = { ...dragState.current, dragging: true, startX: e.clientX, startW: dragState.current.liveW };
-      document.body.style.cursor = "col-resize";
-      el.classList.add("dragging");
-      e.preventDefault();
+    const onMove = (event: MouseEvent) => {
+      if (!sideDrag.current || !bodyRef.current) return;
+      const rect = bodyRef.current.getBoundingClientRect();
+      const width = ((rect.right - event.clientX) / rect.width) * 100;
+      setSideWidth(Math.max(24, Math.min(62, width)));
     };
-    const move = (e: MouseEvent) => {
-      const st = dragState.current;
-      if (!st.dragging) return;
-      const bodyW = bodyRef.current?.getBoundingClientRect().width || 1200;
-      const dynMax = Math.max(400, bodyW - 280);
-      setDiffWidth(Math.max(280, Math.min(dynMax, st.startW + st.startX - e.clientX)));
-    };
-    const up = () => {
-      dragState.current.dragging = false;
+    const onUp = () => {
+      sideDrag.current = false;
       document.body.style.cursor = "";
-      el.classList.remove("dragging");
     };
-    el.addEventListener("mousedown", down);
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     return () => {
-      el.removeEventListener("mousedown", down);
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
     };
   }, []);
 
-  useEffect(() => {
-    dragState.current.liveW = diffWidth;
-  }, [diffWidth]);
-
-  const mainContent = view === "chat"
-    ? (
+  const mainContent = (() => {
+    if (view === "chat") return (
       <>
         {error && <div className="error-banner inline">{error}</div>}
         <Chat sessionId={sessionId} useMock={settings.useMock} onError={setError} />
-        {termOpen && termPlacement === "bottom" && <Terminal onClose={() => setTermOpen(false)} placement="bottom" onTogglePlacement={() => setTermPlacement("right")} height={termHeight} onHeightChange={setTermHeight} />}
       </>
-    )
-    : view === "gateway" ? <GatewayStatusPanel />
-    : <StubPanel title={view[0].toUpperCase() + view.slice(1)} />;
+    );
+    if (view === "skills") return <Skills />;
+    if (view === "plugins") return <Plugins />;
+    if (view === "logs") return <Logs />;
+    if (view === "doctor") return <Doctor />;
+    return <GatewayStatusPanel />;
+  })();
 
   return (
     <div className="session">
-      {!hideSidebar && !sidebarCollapsed && <Sidebar onOpenSettings={onOpenSettings} onSplitWith={onSplitWith} splitActive={splitActive} onCollapse={() => setSidebarCollapsed(true)} activeView={view} onViewChange={setView} gateway={gateway} activeSessionId={sessionId} sessions={sessions} sessionAliases={sessionAliases} pinnedSessionIds={pinnedSessionIds} onNewSession={onNewSession} onRenameSession={onRenameSession} onTogglePinSession={onTogglePinSession} onSessionSelect={onSessionSelect} />}
+      {!hideSidebar && !sidebarCollapsed && <Sidebar onOpenSettings={onOpenSettings} onSplitWith={onSplitWith} onPopoutSession={onPopoutSession} splitActive={splitActive} onCollapse={() => setSidebarCollapsed(true)} activeView={view} onViewChange={setView} gateway={gateway} activeSessionId={sessionId} sessions={sessions} sessionAliases={sessionAliases} pinnedSessionIds={pinnedSessionIds} onNewSession={onNewSession} onRenameSession={onRenameSession} onTogglePinSession={onTogglePinSession} onSessionSelect={onSessionSelect} />}
       <div className="main">
         <div className="topbar">
           {!hideSidebar && sidebarCollapsed && <button className="tb-btn icon-only" onClick={() => setSidebarCollapsed(false)} title="Show sidebar"><Icon name="chevRight" size={12} /></button>}
           <div className="tb-crumb"><span>{sessionId}</span><span className="sep">-</span><span className="agent">openclaw</span></div>
-          <div className="tb-status working">agent - working</div>
           <div className="tb-spacer"></div>
+          <button className={"tb-btn" + (diffOpen ? " active" : "")} onClick={() => setDiffOpen((open) => !open)} title="Toggle diff viewer"><Icon name="diff" size={12} /> Diff</button>
+          <button className={"tb-btn" + (terminalOpen ? " active" : "")} onClick={() => setTerminalOpen((open) => !open)} title="Toggle terminal"><Icon name="terminal" size={12} /> Terminal</button>
+          {canClose && onPopoutSession && <button className="tb-btn" onClick={() => onPopoutSession(currentSession)} title="Pop out split"><Icon name="popout" size={12} /> Pop out</button>}
           {canClose && <button className="tb-btn" onClick={onCloseSplit} title="Close split"><Icon name="x" size={12} /> close split</button>}
-          <button className={"tb-btn" + (termOpen ? " active" : "")} onClick={() => setTermOpen(!termOpen)}><Icon name="terminal" size={12} />terminal<span className="kbd">Ctrl+Shift+T</span></button>
-          <button className={"tb-btn" + (diffOpen ? " active" : "")} onClick={() => setDiffOpen(!diffOpen)}><Icon name="diff" size={12} />diff<span className="kbd">Ctrl+Shift+D</span></button>
         </div>
         <div className="body" ref={bodyRef}>
-          <div className="chat-col" style={{ flex: "1 1 0", minWidth: 280, width: 0 }}>{mainContent}</div>
-          {view === "chat" && (diffOpen || (termOpen && termPlacement === "right")) && (
+          <div className="chat-col" style={diffOpen || (terminalOpen && terminalPlacement === "right") ? { width: `${100 - sideWidth}%` } : undefined}>
+            {mainContent}
+            {terminalOpen && terminalPlacement === "bottom" && <Terminal onClose={() => setTerminalOpen(false)} placement={terminalPlacement} onTogglePlacement={() => setTerminalPlacement("right")} height={terminalHeight} onHeightChange={setTerminalHeight} />}
+          </div>
+          {(diffOpen || (terminalOpen && terminalPlacement === "right")) && (
             <>
-              <div className="h-resizer" ref={diffDragRef}></div>
-              <div className="side-col" style={{ flex: "0 0 " + diffWidth + "px", width: diffWidth + "px", minWidth: 0, maxWidth: "none" }}>
-                {diffOpen && <DiffViewer onClose={() => setDiffOpen(false)} />}
-                {termOpen && termPlacement === "right" && <Terminal onClose={() => setTermOpen(false)} placement="right" onTogglePlacement={() => setTermPlacement("bottom")} height={termHeight} onHeightChange={setTermHeight} />}
+              <div className="side-resizer" onMouseDown={() => { sideDrag.current = true; document.body.style.cursor = "col-resize"; }} />
+              <div className="side-panel" style={{ width: `${sideWidth}%` }}>
+                {diffOpen ? <DiffViewer onClose={() => setDiffOpen(false)} /> : terminalOpen ? <Terminal onClose={() => setTerminalOpen(false)} placement={terminalPlacement} onTogglePlacement={() => setTerminalPlacement("bottom")} height={terminalHeight} onHeightChange={setTerminalHeight} /> : null}
               </div>
             </>
           )}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppSettings } from "../lib/types";
+import { normalizeStatusLineItems, STATUS_LINE_ITEMS } from "../lib/statusLine";
 import { Icon } from "./Icons";
 
 const ACCENTS = [
@@ -20,6 +21,11 @@ export function applySettings(s: AppSettings) {
   const accent = ACCENTS.find((a) => a.id === s.accent) || ACCENTS[0];
   const font = FONTS.find((f) => f.id === s.font) || FONTS[0];
   const root = document.documentElement;
+
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const isLight = s.theme === "light" || (s.theme === "system" && !prefersDark);
+  root.setAttribute("data-theme", isLight ? "light" : "dark");
+
   root.style.setProperty("--accent", `oklch(0.72 0.18 ${accent.hue})`);
   root.style.setProperty("--accent-soft", `oklch(0.72 0.18 ${accent.hue} / 0.15)`);
   root.style.setProperty("--accent-dim", `oklch(0.72 0.18 ${accent.hue} / 0.35)`);
@@ -31,8 +37,22 @@ export function applySettings(s: AppSettings) {
 export function SettingsModal({ onClose, settings, onChange }: { onClose: () => void; settings: AppSettings; onChange: (patch: Partial<AppSettings>) => void }) {
   const [tab, setTab] = useState<"appearance" | "openclaw" | "general" | "about">("appearance");
   const [path, setPath] = useState(settings.openclawPath);
+  const statusItems = normalizeStatusLineItems(settings.statusLineItems);
 
   useEffect(() => setPath(settings.openclawPath), [settings.openclawPath]);
+
+  const changeStatusItem = (index: number, enabled: boolean) => {
+    onChange({ statusLineItems: statusItems.map((item, i) => i === index ? { ...item, enabled } : item) });
+  };
+
+  const moveStatusItem = (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= statusItems.length) return;
+    const next = [...statusItems];
+    const [item] = next.splice(index, 1);
+    next.splice(nextIndex, 0, item);
+    onChange({ statusLineItems: next });
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -84,7 +104,33 @@ export function SettingsModal({ onClose, settings, onChange }: { onClose: () => 
                 <label className="setting check-row"><input type="checkbox" checked={settings.useMock} onChange={(e) => onChange({ useMock: e.target.checked })} /> Use mock adapter</label>
               </>
             )}
-            {tab === "general" && <div style={{ color: "var(--fg-3)" }}>Worktree defaults and notifications are not part of this iteration.</div>}
+            {tab === "general" && (
+              <>
+                <label className="setting check-row"><input type="checkbox" checked={settings.statusLineEnabled} onChange={(e) => onChange({ statusLineEnabled: e.target.checked })} /> Show status line</label>
+                <div className="setting">
+                  <div className="setting-label">Status line items</div>
+                  <div className="status-config-list">
+                    {statusItems.map((item, index) => {
+                      const def = STATUS_LINE_ITEMS.find((candidate) => candidate.id === item.id);
+                      return (
+                        <div key={item.id} className="status-config-row">
+                          <label className="status-config-toggle">
+                            <input type="checkbox" checked={item.enabled} onChange={(e) => changeStatusItem(index, e.target.checked)} />
+                            <span>{def?.label ?? item.id}</span>
+                            {def?.unavailable && <em>n/a</em>}
+                          </label>
+                          <div className="status-config-actions">
+                            <button className="panel-btn" disabled={index === 0} onClick={() => moveStatusItem(index, -1)} title="Move up"><Icon name="chevUp" size={12} /></button>
+                            <button className="panel-btn" disabled={index === statusItems.length - 1} onClick={() => moveStatusItem(index, 1)} title="Move down"><Icon name="chevDown" size={12} /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="setting-hint">Context, token, and limit fields are available for layout now and show n/a until OpenClaw exposes usage data.</div>
+                </div>
+              </>
+            )}
             {tab === "about" && <div style={{ color: "var(--fg-3)" }}>AgentUI v0.1.0 - Tauri shell for openclaw.</div>}
           </div>
         </div>

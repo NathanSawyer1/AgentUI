@@ -18,6 +18,94 @@ export interface OptionItem {
   active?: boolean;
 }
 
+export interface SkillMissing {
+  bins: string[];
+  anyBins: string[];
+  env: string[];
+  config: string[];
+  os: string[];
+}
+
+export interface SkillItem {
+  name: string;
+  description?: string;
+  emoji?: string;
+  eligible: boolean;
+  disabled: boolean;
+  modelVisible: boolean;
+  userInvocable: boolean;
+  commandVisible: boolean;
+  source?: string;
+  bundled?: boolean;
+  homepage?: string;
+  missing?: SkillMissing;
+}
+
+export interface PluginDependencyStatus {
+  hasDependencies?: boolean;
+  installed?: boolean;
+  requiredInstalled?: boolean;
+  optionalInstalled?: boolean;
+  missing?: string[];
+  missingOptional?: string[];
+  dependencies?: JsonValue[];
+  optionalDependencies?: JsonValue[];
+}
+
+export interface PluginItem {
+  id: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  format?: string;
+  source?: string;
+  rootDir?: string;
+  origin?: string;
+  enabled: boolean;
+  status?: string;
+  toolNames?: string[];
+  hookNames?: string[];
+  channelIds?: string[];
+  cliBackendIds?: string[];
+  providerIds?: string[];
+  speechProviderIds?: string[];
+  realtimeTranscriptionProviderIds?: string[];
+  realtimeVoiceProviderIds?: string[];
+  mediaUnderstandingProviderIds?: string[];
+  imageGenerationProviderIds?: string[];
+  videoGenerationProviderIds?: string[];
+  musicGenerationProviderIds?: string[];
+  webFetchProviderIds?: string[];
+  webSearchProviderIds?: string[];
+  migrationProviderIds?: string[];
+  memoryEmbeddingProviderIds?: string[];
+  agentHarnessIds?: string[];
+  gatewayMethods?: string[];
+  cliCommands?: string[];
+  services?: string[];
+  gatewayDiscoveryServiceIds?: string[];
+  commands?: string[];
+  httpRoutes?: number;
+  hookCount?: number;
+  dependencyStatus?: PluginDependencyStatus;
+  [key: string]: JsonValue | PluginDependencyStatus | undefined;
+}
+
+export interface PluginSearchResult {
+  id: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  spec?: string;
+  source?: string;
+  author?: string;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface PluginActionResult {
+  output: string;
+}
+
 export interface ChatSendOptions {
   agentId?: string;
   model?: string;
@@ -30,12 +118,24 @@ export interface PreviewLine {
   t: string;
 }
 
+export type ActivityKind = "tool" | "terminal" | "subagent" | "file" | "search" | "network" | "unknown";
+export type ActivityStatus = "ok" | "err" | "running";
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
 export interface ToolBlock {
   type: "tool";
-  name: string;
-  arg: string;
-  status: "ok" | "err" | "running";
-  preview: PreviewLine[];
+  kind?: ActivityKind;
+  title?: string;
+  summary?: string;
+  status: ActivityStatus;
+  input?: JsonValue;
+  output?: JsonValue;
+  error?: JsonValue;
+  metadata?: Record<string, JsonValue>;
+  raw?: JsonValue;
+  name?: string;
+  arg?: string;
+  preview?: PreviewLine[];
 }
 
 export interface TextBlock {
@@ -51,6 +151,7 @@ export type MessageBlock = TextBlock | ToolBlock | ThinkingBlock;
 
 export interface UserMessage {
   id?: string;
+  historyKey?: string;
   kind: "user";
   time: string;
   text: string;
@@ -58,12 +159,14 @@ export interface UserMessage {
 
 export interface AgentMessage {
   id?: string;
+  historyKey?: string;
   kind: "agent";
   time: string;
   blocks: MessageBlock[];
 }
 
 export type Message = UserMessage | AgentMessage;
+export type ChatMessage = Message;
 
 export interface HistoryMessage {
   id?: string;
@@ -77,6 +180,11 @@ export interface DiffFile {
   adds: number;
   dels: number;
   active?: boolean;
+}
+
+export interface DiffPatch {
+  path: string;
+  patch: string;
 }
 
 export interface DiffCell {
@@ -96,6 +204,32 @@ export interface TermLine {
   cmd?: string;
 }
 
+export interface RunId {
+  runId: string;
+}
+
+export interface TerminalEvent {
+  runId: string;
+  stream?: "stdout" | "stderr";
+  line?: string;
+  exitCode?: number | null;
+  error?: string;
+  done?: boolean;
+}
+
+export interface LogsEvent {
+  runId: string;
+  line?: string;
+  record?: JsonValue;
+  error?: string;
+  done?: boolean;
+}
+
+export interface AgentCapabilities {
+  permissionFlags: boolean;
+  archiveSession: boolean;
+}
+
 export interface GatewayNode {
   name: string;
   status: "online" | "degraded" | "offline";
@@ -113,12 +247,81 @@ export interface GatewayStatus {
   message?: string;
 }
 
+export interface DoctorCheck {
+  id: string;
+  label: string;
+  status: "ok" | "warn" | "err";
+  detail: string;
+}
+
+export interface DoctorReport {
+  appVersion: string;
+  mode: "mock" | "live";
+  binaryPath?: string;
+  tokenPresent: boolean;
+  checks: DoctorCheck[];
+}
+
+export type StatusLineItemId =
+  | "session"
+  | "sessionId"
+  | "split"
+  | "gateway"
+  | "latency"
+  | "time"
+  | "mock"
+  | "cwd"
+  | "repo"
+  | "gitBranch"
+  | "gitWorktree"
+  | "gitChanges"
+  | "gitHead"
+  | "contextWindow"
+  | "tokensInput"
+  | "tokensOutput"
+  | "tokensTotal"
+  | "fiveHourLimit"
+  | "weeklyLimit";
+
+export interface StatusLineItemSetting {
+  id: StatusLineItemId;
+  enabled: boolean;
+}
+
+export interface WorkspaceStatus {
+  cwd: string;
+  repo?: string;
+  gitBranch?: string;
+  gitWorktree?: string;
+  gitChanges?: number;
+  gitHead?: string;
+}
+
 export type ChatEvent =
   | { session_id: string; type: "start"; message_id?: string }
   | { session_id: string; type: "token"; content: string; message_id?: string }
   | { session_id: string; type: "tool"; block: ToolBlock; message_id?: string }
   | { session_id: string; type: "done"; message_id?: string }
   | { session_id: string; type: "error"; error: string; message_id?: string };
+
+export interface SlashCommandArgChoice { value: string; label?: string; }
+export interface SlashCommandArg {
+  name: string;
+  description?: string;
+  type?: string;
+  choices?: SlashCommandArgChoice[];
+}
+export interface SlashCommand {
+  name: string;
+  nativeName?: string;
+  textAliases: string[];
+  description?: string;
+  category?: string;
+  source?: string;
+  scope?: string;
+  acceptsArgs: boolean;
+  args?: SlashCommandArg[];
+}
 
 export interface AppSettings {
   openclawPath: string;
@@ -127,4 +330,7 @@ export interface AppSettings {
   font: "jetbrains" | "plex" | "inter";
   fontSize: number;
   useMock: boolean;
+  statusLineEnabled: boolean;
+  statusLineTemplate: string;
+  statusLineItems: StatusLineItemSetting[];
 }

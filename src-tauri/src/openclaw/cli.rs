@@ -1,21 +1,27 @@
-use super::{ChatEvent, ChatSendOptions, EventSink, GatewayStatus, HistoryMessage, OpenclawAdapter, OptionItem, SessionInfo};
+use super::cli_binary::{build_command, resolve_agent_session_id, run_json, ChatThreads};
+use super::cli_normalize::{
+    normalize_gateway_status, normalize_history_messages, normalize_options,
+    normalize_session_create, normalize_sessions, normalize_skills, value_id,
+};
+use super::{
+    AgentCapabilities, ChatSendOptions, EventSink, GatewayStatus, HistoryMessage, OpenclawAdapter,
+    OptionItem, PluginActionResult, PluginItem, PluginSearchResult, SessionInfo, SkillItem,
+    SlashCommand,
+};
 use crate::settings::SettingsStore;
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 use std::{
-    collections::{HashMap, VecDeque},
-    io::{BufReader, Read},
-    process::{Child, Command, Stdio},
+    collections::VecDeque,
+    process::Command,
     sync::{Arc, Mutex},
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const HISTORY_LIMIT: usize = 28;
 
 pub struct CliOpenclawAdapter {
     settings: Arc<SettingsStore>,
-    children: Arc<Mutex<HashMap<String, Child>>>,
+    chat_threads: ChatThreads,
     latency_history: Arc<Mutex<VecDeque<u64>>>,
 }
 
@@ -23,60 +29,86 @@ impl CliOpenclawAdapter {
     pub fn new(settings: Arc<SettingsStore>) -> Self {
         Self {
             settings,
-            children: Arc::new(Mutex::new(HashMap::new())),
+            chat_threads: ChatThreads::new(),
             latency_history: Arc::new(Mutex::new(VecDeque::with_capacity(HISTORY_LIMIT))),
         }
     }
 
-    fn binary(&self) -> Result<String> {
-        let configured = self.settings.get().openclaw_path;
-        if !configured.trim().is_empty() {
-            return Ok(configured);
-        }
-        which::which("openclaw")
-            .map(|path| path.to_string_lossy().to_string())
-            .context("openclaw binary not found on PATH. Set Settings > Openclaw > Binary path or enable the mock adapter.")
-    }
-
     fn command(&self) -> Result<Command> {
-        let mut command = Command::new(self.binary()?);
-        if let Ok(token) = std::env::var("OPENCLAW_GATEWAY_TOKEN") {
-            if !token.trim().is_empty() {
-                command.env("OPENCLAW_GATEWAY_TOKEN", token);
-            }
-        }
-        Ok(command)
+        build_command(&self.settings)
     }
 
     fn run_json(&self, args: &[&str]) -> Result<Value> {
-        let output = self.command()?.args(args).output().with_context(|| format!("failed to run `openclaw {}`", args.join(" ")))?;
-        if !output.status.success() {
-            return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()));
-        }
-        serde_json::from_slice(&output.stdout).with_context(|| format!("failed to parse `openclaw {}` JSON", args.join(" ")))
+        run_json(&self.settings, args)
     }
 
     fn resolve_agent_session_id(&self, session: &str) -> String {
-        let Ok(value) = self.run_json(&["sessions", "--json", "--all-agents"]) else {
-            return session.to_string();
-        };
-        value
-            .get("sessions")
-            .or_else(|| value.get("items"))
-            .or_else(|| value.get("data"))
-            .and_then(Value::as_array)
-            .and_then(|items| {
-                items.iter().find_map(|item| {
-                    let key = item.get("key").or_else(|| item.get("id")).and_then(Value::as_str)?;
-                    if key == session {
-                        item.get("sessionId").or_else(|| item.get("session_id")).and_then(Value::as_str).map(str::to_string)
-                    } else {
-                        None
-                    }
-                })
-            })
-            .unwrap_or_else(|| session.to_string())
+        resolve_agent_session_id(&self.settings, session)
     }
+
+    fn run_text(&self, args: &[&str], label: &str) -> Result<PluginActionResult> {
+        let output = self
+            .command()?
+            .args(args)
+            .output()
+            .with_context(|| format!("failed to run `{label}`"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !output.status.success() {
+            let message = if stderr.is_empty() { stdout } else { stderr };
+            return Err(anyhow!("{}", message));
+        }
+        let combined = match (stdout.is_empty(), stderr.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => stdout,
+            (true, false) => stderr,
+            (false, false) => format!("{stdout}\n{stderr}"),
+        };
+        Ok(PluginActionResult { output: combined })
+    }
+}
+
+fn parse_plugins(value: Value) -> Vec<PluginItem> {
+    value
+        .get("plugins")
+        .and_then(Value::as_array)
+        .cloned()
+        .or_else(|| value.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| serde_json::from_value::<PluginItem>(item).ok())
+        .collect()
+}
+
+fn parse_plugin_search_results(value: Value) -> Vec<PluginSearchResult> {
+    let items = value
+        .get("results")
+        .or_else(|| value.get("plugins"))
+        .or_else(|| value.get("items"))
+        .and_then(Value::as_array)
+        .cloned()
+        .or_else(|| value.as_array().cloned())
+        .unwrap_or_default();
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let mut result = serde_json::from_value::<PluginSearchResult>(item.clone()).ok();
+            if result.is_none() {
+                let id = value_id(&item)?;
+                result = Some(PluginSearchResult {
+                    id: id.clone(),
+                    name: Some(id),
+                    version: None,
+                    description: None,
+                    spec: None,
+                    source: None,
+                    author: None,
+                    extra: serde_json::Map::new(),
+                });
+            }
+            result
+        })
+        .collect()
 }
 
 impl OpenclawAdapter for CliOpenclawAdapter {
@@ -85,10 +117,46 @@ impl OpenclawAdapter for CliOpenclawAdapter {
         Ok(normalize_gateway_status(&value, &self.latency_history))
     }
 
-    fn chat(&self, session: &str, text: &str, options: ChatSendOptions, on_event: EventSink) -> Result<()> {
+    fn session_create(&self, agent_id: Option<&str>) -> Result<SessionInfo> {
+        let mut command = self.command()?;
+        command.args(["agent", "--message", "", "--json"]);
+        if let Some(agent_id) = agent_id.map(str::trim).filter(|value| !value.is_empty()) {
+            command.args(["--agent", agent_id]);
+        }
+        let output = command
+            .output()
+            .context("failed to run `openclaw agent --message \"\" --json`")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Err(anyhow!(
+                "{}",
+                if stderr.is_empty() { stdout } else { stderr }
+            ));
+        }
+        let value: Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse session create JSON")?;
+        normalize_session_create(&value)
+            .ok_or_else(|| anyhow!("openclaw did not return a session id"))
+    }
+
+    fn chat(
+        &self,
+        session: &str,
+        text: &str,
+        options: ChatSendOptions,
+        on_event: EventSink,
+    ) -> Result<()> {
         let agent_session_id = self.resolve_agent_session_id(session);
         let mut command = self.command()?;
-        command.args(["agent", "--session-id", agent_session_id.as_str(), "--message", text, "--json"]);
+        command.args([
+            "agent",
+            "--session-id",
+            agent_session_id.as_str(),
+            "--message",
+            text,
+            "--json",
+        ]);
         if let Some(agent_id) = options.agent_id.filter(|v| !v.trim().is_empty()) {
             command.args(["--agent", agent_id.trim()]);
         }
@@ -98,79 +166,14 @@ impl OpenclawAdapter for CliOpenclawAdapter {
         if let Some(thinking) = options.thinking.filter(|v| !v.trim().is_empty()) {
             command.args(["--thinking", thinking.trim()]);
         }
-        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
-        let session_id = session.to_string();
-        let children = Arc::clone(&self.children);
-        thread::spawn(move || {
-            let mut child = match command.spawn() {
-                Ok(child) => child,
-                Err(error) => {
-                    on_event(ChatEvent::Error { session_id, error: error.to_string(), message_id: None });
-                    return;
-                }
-            };
-
-            let stdout = child.stdout.take();
-            let stderr = child.stderr.take();
-            children.lock().expect("children mutex poisoned").insert(session_id.clone(), child);
-            on_event(ChatEvent::Start { session_id: session_id.clone(), message_id: None });
-
-            let stderr_text = Arc::new(Mutex::new(String::new()));
-            let stderr_capture = Arc::clone(&stderr_text);
-            let stderr_thread = stderr.map(|mut stderr| {
-                thread::spawn(move || {
-                    let mut text = String::new();
-                    let _ = stderr.read_to_string(&mut text);
-                    *stderr_capture.lock().expect("stderr mutex poisoned") = text;
-                })
-            });
-
-            let mut stdout_text = String::new();
-            if let Some(stdout) = stdout {
-                let mut reader = BufReader::new(stdout);
-                let _ = reader.read_to_string(&mut stdout_text);
-            }
-
-            if !stdout_text.trim().is_empty() {
-                match serde_json::from_str::<Value>(&stdout_text).context("failed to parse openclaw agent JSON envelope") {
-                    Ok(value) => emit_chat_envelope(&session_id, &value, &on_event),
-                    Err(error) => on_event(ChatEvent::Error { session_id: session_id.clone(), error: error.to_string(), message_id: None }),
-                }
-            }
-
-            let mut command_failed = false;
-            if let Some(mut child) = children.lock().expect("children mutex poisoned").remove(&session_id) {
-                match child.wait() {
-                    Ok(status) if status.success() => {}
-                    Ok(status) => {
-                        command_failed = true;
-                        on_event(ChatEvent::Error { session_id: session_id.clone(), error: format!("openclaw agent exited with {status}"), message_id: None });
-                    }
-                    Err(error) => {
-                        command_failed = true;
-                        on_event(ChatEvent::Error { session_id: session_id.clone(), error: error.to_string(), message_id: None });
-                    }
-                }
-            }
-            if let Some(handle) = stderr_thread {
-                let _ = handle.join();
-            }
-            if command_failed {
-                let stderr = stderr_text.lock().expect("stderr mutex poisoned").trim().to_string();
-                if !stderr.is_empty() {
-                    on_event(ChatEvent::Error { session_id: session_id.clone(), error: stderr, message_id: None });
-                }
-            }
-            on_event(ChatEvent::Done { session_id, message_id: None });
-        });
+        self.chat_threads
+            .spawn_chat(session.to_string(), command, on_event);
         Ok(())
     }
 
     fn chat_cancel(&self, session: &str) -> Result<()> {
-        if let Some(mut child) = self.children.lock().expect("children mutex poisoned").remove(session) {
-            child.kill().context("failed to kill openclaw chat process")?;
-        }
+        let _ = self.chat_threads.kill_child(session);
         Ok(())
     }
 
@@ -183,19 +186,121 @@ impl OpenclawAdapter for CliOpenclawAdapter {
         match self.run_json(&["agents", "list", "--json"]) {
             Ok(value) => Ok(normalize_options(&value, "agent")),
             Err(_) => {
-                let fallback = vec!["main".into(), "coder".into(), "reviewer".into(), "explore".into(), "mini".into(), "research-lite".into()];
+                let fallback = vec![
+                    "main".into(),
+                    "coder".into(),
+                    "reviewer".into(),
+                    "explore".into(),
+                    "mini".into(),
+                    "research-lite".into(),
+                ];
                 let agents = self
                     .run_json(&["health", "--json"])
                     .ok()
-                    .and_then(|value| value.get("agents").and_then(Value::as_array).map(|items| items.iter().filter_map(value_id).collect::<Vec<_>>()))
+                    .and_then(|value| {
+                        value
+                            .get("agents")
+                            .and_then(Value::as_array)
+                            .map(|items| items.iter().filter_map(value_id).collect::<Vec<_>>())
+                    })
                     .filter(|items| !items.is_empty())
                     .unwrap_or(fallback);
                 Ok(agents
                     .into_iter()
-                    .map(|id| OptionItem { id: id.clone(), name: id, meta: "agent".into(), desc: "OpenClaw agent".into(), active: None })
+                    .map(|id| OptionItem {
+                        id: id.clone(),
+                        name: id,
+                        meta: "agent".into(),
+                        desc: "OpenClaw agent".into(),
+                        active: None,
+                    })
                     .collect())
             }
         }
+    }
+
+    fn skills_list(&self) -> Result<Vec<SkillItem>> {
+        let value = self.run_json(&["skills", "list", "--json"])?;
+        Ok(normalize_skills(&value))
+    }
+
+    fn skill_set_enabled(&self, name: &str, enabled: bool) -> Result<Vec<SkillItem>> {
+        let batch = serde_json::json!([
+            {
+                "path": format!("skills.entries.{}.enabled", name),
+                "value": enabled
+            }
+        ])
+        .to_string();
+        let output = self
+            .command()?
+            .args(["config", "set", "--batch-json", &batch])
+            .output()
+            .context("failed to run `openclaw config set`")?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "{}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        self.skills_list()
+    }
+
+    fn plugins_list(&self) -> Result<Vec<PluginItem>> {
+        let value = self.run_json(&["plugins", "list", "--json"])?;
+        Ok(parse_plugins(value))
+    }
+
+    fn plugin_set_enabled(&self, id: &str, enabled: bool) -> Result<Vec<PluginItem>> {
+        let action = if enabled { "enable" } else { "disable" };
+        let output = self
+            .command()?
+            .args(["plugins", action, id])
+            .output()
+            .with_context(|| format!("failed to run `openclaw plugins {action}`"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            return Err(anyhow!(
+                "{}",
+                if stderr.is_empty() { stdout } else { stderr }
+            ));
+        }
+        self.plugins_list()
+    }
+
+    fn plugins_search(&self, query: &str, limit: usize) -> Result<Vec<PluginSearchResult>> {
+        let limit = limit.clamp(1, 50).to_string();
+        let value = self.run_json(&["plugins", "search", "--json", "--limit", &limit, query])?;
+        Ok(parse_plugin_search_results(value))
+    }
+
+    fn plugin_install(&self, spec: &str) -> Result<PluginActionResult> {
+        self.run_text(&["plugins", "install", spec], "openclaw plugins install")
+    }
+
+    fn plugin_update(&self, id: Option<&str>) -> Result<PluginActionResult> {
+        match id.filter(|value| !value.trim().is_empty()) {
+            Some(id) => self.run_text(&["plugins", "update", id], "openclaw plugins update"),
+            None => self.run_text(
+                &["plugins", "update", "--all"],
+                "openclaw plugins update --all",
+            ),
+        }
+    }
+
+    fn plugin_uninstall_preview(&self, id: &str) -> Result<PluginActionResult> {
+        self.run_text(
+            &["plugins", "uninstall", "--dry-run", id],
+            "openclaw plugins uninstall --dry-run",
+        )
+    }
+
+    fn plugin_uninstall(&self, id: &str) -> Result<PluginActionResult> {
+        self.run_text(
+            &["plugins", "uninstall", "--force", id],
+            "openclaw plugins uninstall --force",
+        )
     }
 
     fn sessions_list(&self) -> Result<Vec<SessionInfo>> {
@@ -207,305 +312,171 @@ impl OpenclawAdapter for CliOpenclawAdapter {
         let params = serde_json::json!({ "sessionKey": session, "limit": limit }).to_string();
         let output = self
             .command()?
-            .args(["gateway", "call", "chat.history", "--json", "--params", &params])
+            .args([
+                "gateway",
+                "call",
+                "chat.history",
+                "--json",
+                "--params",
+                &params,
+            ])
             .output()
             .context("failed to run `openclaw gateway call chat.history --json`")?;
         if !output.status.success() {
-            return Err(anyhow!("{}", String::from_utf8_lossy(&output.stderr).trim()));
+            return Err(anyhow!(
+                "{}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
         }
-        let value: Value = serde_json::from_slice(&output.stdout).context("failed to parse chat.history JSON")?;
+        let value: Value =
+            serde_json::from_slice(&output.stdout).context("failed to parse chat.history JSON")?;
         Ok(normalize_history_messages(&value))
     }
-}
 
-fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &EventSink) {
-    if let Some(error) = value.get("error").or_else(|| value.pointer("/result/error")).and_then(Value::as_str) {
-        on_event(ChatEvent::Error { session_id: session_id.to_string(), error: error.to_string(), message_id: read_message_id(value) });
-        return;
+    fn slash_commands_list(&self) -> Result<Vec<SlashCommand>> {
+        let value = self.run_json(&["gateway", "call", "commands.list", "--json"])?;
+        let arr = value
+            .get("commands")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(arr
+            .into_iter()
+            .filter_map(|v| serde_json::from_value::<SlashCommand>(v).ok())
+            .filter(|c| !c.text_aliases.is_empty())
+            .collect())
     }
 
-    let payload_root = value.get("result").unwrap_or(value);
-    let mut emitted_content = false;
-    if let Some(events) = normalize_chat_event(session_id, payload_root) {
-        for event in events {
-            emitted_content = true;
-            if matches!(event, ChatEvent::Token { .. }) {
-                thread::sleep(Duration::from_millis(20));
-            }
-            on_event(event);
-        }
-    }
-
-    for tool in payload_root.pointer("/meta/tools").and_then(Value::as_array).into_iter().flatten() {
-        emitted_content = true;
-        on_event(ChatEvent::Tool { session_id: session_id.to_string(), block: tool_block_from_event(tool), message_id: read_message_id(value) });
-    }
-
-    if !emitted_content {
-        on_event(ChatEvent::Error { session_id: session_id.to_string(), error: "openclaw agent returned no displayable content".into(), message_id: read_message_id(value) });
-    }
-}
-
-fn normalize_chat_event(session_id: &str, value: &Value) -> Option<Vec<ChatEvent>> {
-    if let Some(stream) = value.get("stream").and_then(Value::as_str) {
-        let data = value.get("data").unwrap_or(value);
-        return match stream {
-            "assistant" => data
-                .get("delta")
-                .or_else(|| data.get("text"))
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-                .map(|content| vec![ChatEvent::Token { session_id: session_id.to_string(), content: content.to_string(), message_id: read_message_id(value) }]),
-            "tool" | "item" | "command_output" => Some(vec![ChatEvent::Tool { session_id: session_id.to_string(), block: tool_block_from_event(data), message_id: read_message_id(value) }]),
-            "error" => Some(vec![ChatEvent::Error {
-                session_id: session_id.to_string(),
-                error: data.get("error").or_else(|| data.get("message")).and_then(Value::as_str).unwrap_or("openclaw agent error").to_string(),
-                message_id: read_message_id(value),
-            }]),
-            _ => None,
-        };
-    }
-
-    if let Some(payloads) = value.get("payloads").and_then(Value::as_array) {
-        let mut events = Vec::new();
-        for payload in payloads {
-            if let Some(text) = payload.get("text").and_then(Value::as_str) {
-                events.extend(text_chunks(text).map(|content| ChatEvent::Token { session_id: session_id.to_string(), content, message_id: read_message_id(payload) }));
-            }
-        }
-        return Some(events);
-    }
-
-    if let Some(content) = value.get("text").or_else(|| value.get("content")).or_else(|| value.get("token")).and_then(Value::as_str) {
-        return Some(text_chunks(content).map(|content| ChatEvent::Token { session_id: session_id.to_string(), content, message_id: read_message_id(value) }).collect());
-    }
-
-    if let Some(error) = value.get("error").or_else(|| value.get("message")).and_then(Value::as_str) {
-        return Some(vec![ChatEvent::Error { session_id: session_id.to_string(), error: error.to_string(), message_id: read_message_id(value) }]);
-    }
-
-    None
-}
-
-fn text_chunks(text: &str) -> impl Iterator<Item = String> + '_ {
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    for ch in text.chars() {
-        current.push(ch);
-        if current.len() >= 30 && ch.is_whitespace() {
-            chunks.push(std::mem::take(&mut current));
-        }
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks.into_iter()
-}
-
-fn read_message_id(value: &Value) -> Option<String> {
-    value.get("message_id")
-        .or_else(|| value.get("messageId"))
-        .or_else(|| value.get("runId"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
-fn tool_block_from_event(data: &Value) -> super::ToolBlock {
-    let status = match data.get("status").and_then(Value::as_str) {
-        Some("completed" | "ok" | "success") => "ok",
-        Some("failed" | "error" | "err") => "err",
-        _ => "running",
-    };
-    let name = data.get("name").or_else(|| data.get("kind")).and_then(Value::as_str).unwrap_or("tool").to_string();
-    let arg = data
-        .get("arg")
-        .or_else(|| data.get("meta"))
-        .or_else(|| data.get("summary"))
-        .or_else(|| data.get("title"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let preview_text = data.get("output").or_else(|| data.get("summary")).or_else(|| data.get("progressText")).and_then(Value::as_str).unwrap_or("");
-    let preview = preview_text.lines().take(20).map(|line| super::PreviewLine { c: None, t: line.to_string() }).collect();
-    super::ToolBlock { block_type: "tool".into(), name, arg, status: status.into(), preview }
-}
-
-fn normalize_gateway_status(value: &Value, history_store: &Arc<Mutex<VecDeque<u64>>>) -> GatewayStatus {
-    let ok = value.get("ok").and_then(Value::as_bool).unwrap_or(false);
-    let status = if ok { "online" } else { "offline" };
-    let latency_ms = value.get("durationMs").and_then(Value::as_u64).unwrap_or(0);
-    let checked = checked_at(value);
-
-    let mut nodes = Vec::new();
-    if let Some(plugins) = value.pointer("/plugins/loaded").and_then(Value::as_array) {
-        for plugin in plugins {
-            if let Some(id) = value_id(plugin) {
-                nodes.push(super::GatewayNode { name: format!("plugin:{id}"), status: "online".into(), latency_ms: 0, last_seen: checked.clone() });
-            }
-        }
-    }
-    if let Some(channels) = value.get("channels").and_then(Value::as_object) {
-        for (name, channel) in channels {
-            let channel_ok = channel.get("ok").and_then(Value::as_bool).unwrap_or(true);
-            nodes.push(super::GatewayNode { name: format!("channel:{name}"), status: if channel_ok { "online" } else { "offline" }.into(), latency_ms: 0, last_seen: checked.clone() });
-        }
-    }
-    if nodes.is_empty() {
-        nodes.push(super::GatewayNode { name: "gateway".into(), status: status.into(), latency_ms, last_seen: checked.clone() });
-    }
-
-    let history = {
-        let mut history = history_store.lock().expect("latency history mutex poisoned");
-        history.push_back(latency_ms);
-        while history.len() > HISTORY_LIMIT {
-            history.pop_front();
-        }
-        history.iter().copied().collect()
-    };
-
-    GatewayStatus {
-        status: status.into(),
-        latency_ms,
-        checked_at: checked,
-        version: value.pointer("/gateway/version").or_else(|| value.get("version")).and_then(Value::as_str).map(str::to_string),
-        nodes,
-        history,
-        message: value.get("message").and_then(Value::as_str).map(str::to_string),
-    }
-}
-
-fn checked_at(value: &Value) -> String {
-    if let Some(ts) = value.get("ts").and_then(Value::as_str) {
-        return ts.to_string();
-    }
-    let millis = value.get("ts").and_then(Value::as_u64).unwrap_or_else(|| {
-        SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_millis() as u64).unwrap_or(0)
-    });
-    format!("{millis}")
-}
-
-fn normalize_options(value: &Value, default_meta: &str) -> Vec<OptionItem> {
-    let items = value
-        .get("models")
-        .or_else(|| value.get("agents"))
-        .or_else(|| value.get("items"))
-        .or_else(|| value.get("data"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_else(|| value.as_array().cloned().unwrap_or_default());
-
-    items
-        .iter()
-        .filter_map(|item| {
-            let id = value_id(item)?;
-            let name = item.get("name").and_then(Value::as_str).unwrap_or(&id).to_string();
-            let meta = item.get("provider").or_else(|| item.get("meta")).or_else(|| item.get("model")).and_then(Value::as_str).unwrap_or(default_meta).to_string();
-            let desc = item.get("description").or_else(|| item.get("desc")).and_then(Value::as_str).unwrap_or("").to_string();
-            Some(OptionItem { id, name, meta, desc, active: None })
+    fn agent_capabilities(&self) -> Result<AgentCapabilities> {
+        Ok(AgentCapabilities {
+            permission_flags: false,
+            archive_session: false,
         })
-        .collect()
-}
-
-fn normalize_sessions(value: &Value) -> Vec<SessionInfo> {
-    let items = value
-        .get("sessions")
-        .or_else(|| value.get("items"))
-        .or_else(|| value.get("data"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_else(|| value.as_array().cloned().unwrap_or_default());
-
-    items
-        .iter()
-        .filter_map(|item| {
-            let id = item
-                .get("key")
-                .or_else(|| item.get("id"))
-                .or_else(|| item.get("sessionId"))
-                .or_else(|| item.get("session_id"))
-                .and_then(Value::as_str)?
-                .to_string();
-            let age_ms = item.get("ageMs").or_else(|| item.get("age_ms")).and_then(Value::as_u64);
-            let time = age_ms.map(format_age).or_else(|| item.get("updatedAt").or_else(|| item.get("updated_at")).and_then(Value::as_str).map(str::to_string)).unwrap_or_default();
-            let updated_at = item.get("updatedAt").or_else(|| item.get("updated_at")).and_then(Value::as_str).map(str::to_string);
-            Some(SessionInfo { id: id.clone(), name: id, status: "idle".into(), time, active: None, age_ms, updated_at })
-        })
-        .collect()
-}
-
-fn normalize_history_messages(value: &Value) -> Vec<HistoryMessage> {
-    let messages = value
-        .get("messages")
-        .or_else(|| value.pointer("/history/messages"))
-        .or_else(|| value.get("items"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-
-    messages
-        .iter()
-        .filter_map(|message| {
-            let role = message.get("role").and_then(Value::as_str)?.to_lowercase();
-            if role != "user" && role != "assistant" {
-                return None;
-            }
-            let text = message_text(message).trim().to_string();
-            if text.is_empty() {
-                return None;
-            }
-            let id = message
-                .get("id")
-                .or_else(|| message.get("messageId"))
-                .or_else(|| message.get("message_id"))
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            let timestamp = message.get("timestamp").or_else(|| message.get("createdAt")).and_then(Value::as_u64);
-            Some(HistoryMessage { id, role, text, timestamp })
-        })
-        .collect()
-}
-
-fn message_text(message: &Value) -> String {
-    if let Some(text) = message.get("text").and_then(Value::as_str) {
-        return text.to_string();
     }
-    if let Some(content) = message.get("content") {
-        if let Some(text) = content.as_str() {
-            return text.to_string();
-        }
-        if let Some(blocks) = content.as_array() {
-            return blocks
-                .iter()
-                .filter_map(|block| {
-                    block
-                        .get("text")
-                        .or_else(|| block.get("content"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::openclaw::cli_normalize::*;
+    use serde_json::json;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn normalize_sessions_reads_common_id_shapes() {
+        let value = json!({
+            "sessions": [
+                { "key": "session-alpha", "ageMs": 5000 },
+                { "id": "session-beta", "ageMs": 6000 },
+                { "sessionId": "session-gamma", "ageMs": 7000 },
+                { "session_id": "session-delta", "ageMs": 8000 }
+            ]
+        });
+        let ids: Vec<_> = normalize_sessions(&value)
+            .into_iter()
+            .map(|session| session.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                "session-alpha",
+                "session-beta",
+                "session-gamma",
+                "session-delta"
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_session_create_reads_common_envelopes() {
+        for value in [
+            json!({ "sessionId": "a" }),
+            json!({ "session_id": "b" }),
+            json!({ "sessionKey": "c" }),
+            json!({ "result": { "session": { "session_key": "d" } } }),
+        ] {
+            assert!(normalize_session_create(&value).is_some());
         }
     }
-    String::new()
-}
 
-fn value_id(value: &Value) -> Option<String> {
-    value
-        .as_str()
-        .map(str::to_string)
-        .or_else(|| value.get("id").or_else(|| value.get("key")).or_else(|| value.get("name")).and_then(Value::as_str).map(str::to_string))
-}
+    #[test]
+    fn normalize_history_messages_filters_roles_and_extracts_text() {
+        let value = json!({
+            "messages": [
+                { "role": "user", "text": "hello world" },
+                { "role": "assistant", "content": [{ "text": "part one" }, { "text": "part two" }] },
+                { "role": "system", "text": "system msg" },
+                { "role": "tool", "text": "tool msg" }
+            ]
+        });
+        let messages = normalize_history_messages(&value);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].text, "hello world");
+        assert_eq!(messages[1].text, "part one\npart two");
+    }
 
-fn format_age(ms: u64) -> String {
-    let seconds = ms / 1000;
-    if seconds < 60 {
-        format!("{seconds}s")
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else if seconds < 86_400 {
-        format!("{}h", seconds / 3600)
-    } else {
-        format!("{}d", seconds / 86_400)
+    #[test]
+    fn normalize_gateway_status_builds_plugin_and_channel_nodes() {
+        let value = json!({
+            "ok": true,
+            "durationMs": 42,
+            "plugins": { "loaded": ["plugin-a", "plugin-b"] },
+            "channels": {
+                "channel-1": { "ok": true },
+                "channel-2": { "ok": false }
+            }
+        });
+        let history = Arc::new(Mutex::new(VecDeque::new()));
+        let status = normalize_gateway_status(&value, &history);
+        assert_eq!(status.status, "online");
+        assert_eq!(status.latency_ms, 42);
+        assert!(status
+            .nodes
+            .iter()
+            .any(|n| n.name == "plugin:plugin-a" && n.status == "online"));
+        assert!(status
+            .nodes
+            .iter()
+            .any(|n| n.name == "channel:channel-1" && n.status == "online"));
+        assert!(status
+            .nodes
+            .iter()
+            .any(|n| n.name == "channel:channel-2" && n.status == "offline"));
+    }
+
+    #[test]
+    fn normalize_gateway_status_empty_nodes_becomes_gateway() {
+        let value = json!({ "ok": false, "durationMs": 0 });
+        let history = Arc::new(Mutex::new(VecDeque::new()));
+        let status = normalize_gateway_status(&value, &history);
+        assert_eq!(status.status, "offline");
+        assert!(status
+            .nodes
+            .iter()
+            .any(|n| n.name == "gateway" && n.status == "offline"));
+    }
+
+    #[test]
+    fn tool_block_from_event_classifies_common_tool_kinds() {
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "bash", "command": "echo hello" })).kind,
+            "terminal"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "delegate", "agentId": "coder" })).kind,
+            "subagent"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "fetch", "url": "https://example.com" })).kind,
+            "network"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "read", "path": "/tmp/file.txt" })).kind,
+            "file"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "grep", "input": "pattern" })).kind,
+            "search"
+        );
     }
 }

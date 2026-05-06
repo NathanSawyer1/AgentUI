@@ -1,4 +1,5 @@
-import type { AppSettings, DiffFile, DiffRow, GatewayStatus, Message, OptionItem, SessionInfo, TermLine } from "./types";
+import type { AppSettings, DiffFile, DiffRow, GatewayStatus, Message, OptionItem, SessionInfo, SlashCommand, TermLine } from "./types";
+import { DEFAULT_STATUS_LINE_ITEMS } from "./statusLine";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   openclawPath: "",
@@ -7,6 +8,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   font: "jetbrains",
   fontSize: 12,
   useMock: false,
+  statusLineEnabled: true,
+  statusLineTemplate: "{session} | {gateway} {latency} | {time}",
+  statusLineItems: DEFAULT_STATUS_LINE_ITEMS,
 };
 
 export const SESSIONS: SessionInfo[] = [
@@ -33,18 +37,59 @@ export const MESSAGES: Message[] = [
       { type: "text", content: "Sure - that sounds like the token bucket isn't clamping the refill. Let me look at the file and reproduce it." },
       {
         type: "tool",
+        kind: "terminal",
+        title: "Terminal",
+        summary: "pnpm vitest ratelimit",
+        status: "ok",
+        input: { command: "pnpm vitest ratelimit" },
+        output: "✓ api/middleware/ratelimit.test.ts (3)\nTest Files  1 passed (1)",
+        metadata: { cwd: "~/openclaw-api", durationMs: 1180, exitCode: 0 },
+        raw: { name: "bash", command: "pnpm vitest ratelimit", status: "completed" },
+        name: "bash",
+        arg: "pnpm vitest ratelimit",
+        preview: [
+          { c: "ok", t: "✓ api/middleware/ratelimit.test.ts (3)" },
+          { c: "muted", t: "Test Files  1 passed (1)" },
+        ],
+      },
+      {
+        type: "tool",
+        kind: "file",
+        title: "File",
+        summary: "Read api/middleware/ratelimit.ts",
+        status: "ok",
+        input: { path: "api/middleware/ratelimit.ts" },
+        output: "export class TokenBucket {\n  take(n = 1) {\n    const now = Date.now()\n    this.tokens += delta * this.rate\n  }\n}",
+        metadata: { durationMs: 14 },
+        raw: { name: "read_file", path: "api/middleware/ratelimit.ts", status: "ok" },
         name: "read_file",
         arg: "api/middleware/ratelimit.ts",
-        status: "ok",
-        preview: [
-          { c: "muted", t: "// 84 lines" },
-          { t: "export class TokenBucket {" },
-          { t: "  take(n = 1) {" },
-          { t: "    const now = Date.now()" },
-          { c: "acc", t: "    this.tokens += delta * this.rate   // no clamp" },
-          { t: "  }" },
-          { t: "}" },
-        ],
+      },
+      {
+        type: "tool",
+        kind: "subagent",
+        title: "Subagent",
+        summary: "Spawned explorer for token bucket tests",
+        status: "running",
+        input: { agent: "explorer", task: "Inspect existing rate limiter tests" },
+        metadata: { agentId: "explorer-12", model: "gpt-5.3-codex", startedAt: "2026-04-25T23:45:00Z" },
+        raw: { kind: "spawn_agent", agentId: "explorer-12", status: "running" },
+        name: "spawn_agent",
+        arg: "explorer",
+      },
+      {
+        type: "tool",
+        kind: "terminal",
+        title: "Terminal",
+        summary: "pnpm test ratelimit --watch=false",
+        status: "err",
+        input: { command: "pnpm test ratelimit --watch=false" },
+        output: "Running focused test suite...",
+        error: "Expected bucket size to stay <= capacity after idle refill.",
+        metadata: { cwd: "~/openclaw-api", durationMs: 620, exitCode: 1 },
+        raw: { name: "bash", status: "failed", stderr: "Expected bucket size to stay <= capacity after idle refill." },
+        name: "bash",
+        arg: "pnpm test ratelimit --watch=false",
       },
       { type: "text", content: "Found it. On line 14 we accumulate tokens based on elapsed time but never clamp to `capacity`." },
     ],
@@ -71,6 +116,15 @@ export const TERM_LINES: TermLine[] = [
   { kind: "ok", text: "✓ api/middleware/ratelimit.test.ts (3)" },
   { kind: "muted", text: "Test Files  1 passed (1)" },
   { kind: "prompt", cwd: "~/openclaw-api (wt/refactor-auth-flow)", cmd: "" },
+];
+
+export const MOCK_SLASH_COMMANDS: SlashCommand[] = [
+  { name: "help", textAliases: ["/help"], description: "Show available commands.", category: "status", source: "native", scope: "both", acceptsArgs: false },
+  { name: "status", textAliases: ["/status"], description: "Show agent and session status.", category: "status", source: "native", scope: "both", acceptsArgs: false },
+  { name: "compact", textAliases: ["/compact"], description: "Compact the conversation history with optional instructions.", category: "session", source: "native", scope: "both", acceptsArgs: true, args: [{ name: "instructions", description: "Custom compaction instructions", type: "string" }] },
+  { name: "think", textAliases: ["/think"], description: "Set the thinking level for this session.", category: "options", source: "native", scope: "both", acceptsArgs: true, args: [{ name: "level", description: "Thinking depth", type: "string", choices: [{ value: "low", label: "low" }, { value: "medium", label: "medium" }, { value: "high", label: "high" }] }] },
+  { name: "tools", textAliases: ["/tools"], description: "List available runtime tools.", category: "status", source: "native", scope: "both", acceptsArgs: true, args: [{ name: "mode", description: "compact or verbose", type: "string", choices: [{ value: "compact", label: "compact" }, { value: "verbose", label: "verbose" }] }] },
+  { name: "model", textAliases: ["/model"], description: "Switch the active model for this session.", category: "options", source: "native", scope: "both", acceptsArgs: true, args: [{ name: "model", description: "Model identifier", type: "string", choices: [{ value: "claude-sonnet-4-6", label: "sonnet-4.6" }, { value: "claude-opus-4-7", label: "opus-4.7" }, { value: "claude-haiku-4-5", label: "haiku-4.5" }] }] },
 ];
 
 export function mockGatewayStatus(): GatewayStatus {
