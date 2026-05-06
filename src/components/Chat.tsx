@@ -7,6 +7,7 @@ import { durationLabel, exitCodeLabel, formatActivityValue, objectValue, stringV
 import type { ChatEvent, ChatMessage, ToolBlock } from "../lib/types";
 import { Composer } from "./Composer";
 import { Icon } from "./Icons";
+import { RefreshButton, RefreshError, RefreshMeta } from "./RefreshStatus";
 
 // ---------------------------------------------------------------------------
 // Tool card
@@ -239,11 +240,19 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyStatus, setHistoryStatus] = useState<HistoryLoadStatus>("initial");
   const [historyError, setHistoryError] = useState("");
+  const [historyStale, setHistoryStale] = useState(false);
+  const [historyUpdatedAt, setHistoryUpdatedAt] = useState<number | undefined>(undefined);
+  const [refreshRequest, setRefreshRequest] = useState({ sessionId: "", nonce: 0 });
 
   const prevSessionRef = useRef<string | null>(null);
   const activeSessionRef = useRef(sessionId);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const scrollModeRef = useRef<"bottom" | "preserve" | "stick" | "none">("bottom");
   const scrollSnapshotRef = useRef<{ height: number; top: number } | null>(null);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const isNearBottom = useCallback(() => {
     const node = scrollRef.current;
@@ -273,29 +282,34 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
       void chatCancel(prev).catch(() => undefined);
     }
     setHistoryError("");
+    setHistoryStale(false);
     if (useMock) {
       markScrollBottom();
       setMessages(MESSAGES);
       setHistoryStatus("ready");
+      setHistoryUpdatedAt(Date.now());
       return;
     }
 
     const cached = getHistoryCache(sessionId);
     const generation = nextHistoryGeneration(sessionId);
+    const forceRefresh = refreshRequest.sessionId === sessionId && refreshRequest.nonce > 0;
     let cancelled = false;
 
     if (cached) {
-      markScrollBottom();
+      setHistoryUpdatedAt(cached.updatedAt);
+      if (forceRefresh) markScrollPreserve();
+      else markScrollBottom();
       setMessages(cached.messages);
-      setHistoryStatus(cached.status);
-      if (cached.status === "ready") return;
+      setHistoryStatus(forceRefresh ? "refreshing" : cached.status);
+      if (!forceRefresh && cached.status === "ready") return;
     } else {
       markScrollBottom();
       setMessages([]);
       setHistoryStatus("initial");
     }
 
-    updateHistoryCache(sessionId, { generation, status: cached?.status ?? "initial", messages: cached?.messages ?? [] });
+    updateHistoryCache(sessionId, { generation, status: forceRefresh ? "refreshing" : cached?.status ?? "initial", messages: cached?.messages ?? [], updatedAt: cached?.updatedAt });
 
     const isCurrent = () => !cancelled && activeSessionRef.current === sessionId && isHistoryGenerationCurrent(sessionId, generation);
 
@@ -303,10 +317,11 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
       .then((history) => {
         if (!isCurrent()) return;
         const recent = mapHistoryMessages(history);
-        markScrollBottom();
+        if (forceRefresh) markScrollPreserve();
+        else markScrollBottom();
         setMessages(recent);
         setHistoryStatus("hydrating");
-        setHistoryCache(sessionId, { messages: recent, status: "hydrating", generation });
+        setHistoryCache(sessionId, { messages: recent, status: "hydrating", generation, updatedAt: cached?.updatedAt });
 
         void sessionHistory(sessionId, FULL_HISTORY_LIMIT)
           .then((fullHistory) => {
@@ -315,16 +330,20 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
             markScrollPreserve();
             setMessages((current) => {
               const merged = mergeHistoryMessages(current, full);
-              setHistoryCache(sessionId, { messages: merged, status: "ready", generation });
+              const updatedAt = Date.now();
+              setHistoryCache(sessionId, { messages: merged, status: "ready", generation, updatedAt });
+              setHistoryUpdatedAt(updatedAt);
               return merged;
             });
             setHistoryStatus("ready");
+            setHistoryStale(false);
           })
           .catch((error) => {
             if (!isCurrent()) return;
             const message = error instanceof Error ? error.message : String(error);
             setHistoryError(message);
             setHistoryStatus("error");
+            setHistoryStale(messagesRef.current.length > 0);
             updateHistoryCache(sessionId, { generation, status: "error" });
             onError(message);
           });
@@ -334,11 +353,12 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
         const message = error instanceof Error ? error.message : String(error);
         setHistoryError(message);
         setHistoryStatus("error");
+        setHistoryStale(messagesRef.current.length > 0);
         updateHistoryCache(sessionId, { generation, status: "error" });
         onError(message);
       });
     return () => { cancelled = true; };
-  }, [sessionId, useMock, onError, markScrollBottom, markScrollPreserve]);
+  }, [sessionId, useMock, refreshRequest, onError, markScrollBottom, markScrollPreserve]);
 
   const applyEvent = useCallback((event: ChatEvent) => {
     markScrollStickIfNeeded();
@@ -382,13 +402,27 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
     });
   };
 
+  const refreshHistory = () => {
+    markScrollPreserve();
+    setRefreshRequest((current) => ({ sessionId, nonce: current.nonce + 1 }));
+  };
+
   return (
     <>
-      <div className="chat-agent-header">{agentName}</div>
+      <div className="chat-agent-header">
+        <span>{agentName}</span>
+        {!useMock && (
+          <div className="chat-history-actions">
+            <RefreshMeta loading={historyStatus === "hydrating" || historyStatus === "refreshing"} updatedAt={historyUpdatedAt} stale={historyStale} />
+            <RefreshButton loading={historyStatus === "hydrating" || historyStatus === "refreshing"} onClick={refreshHistory} />
+          </div>
+        )}
+      </div>
       <div className="chat-scroll" ref={scrollRef}>
         <div className="chat-inner">
           {historyStatus === "hydrating" ? <div className="history-loading">Loading older messages...</div> : null}
-          {historyError ? <div className="error-banner inline history-error">{historyError}</div> : null}
+          {historyStatus === "refreshing" ? <div className="history-loading">Refreshing history...</div> : null}
+          <RefreshError message={historyError} stale={historyStale} onRetry={refreshHistory} />
           {messages.map((m, i) => <Message key={m.id ?? i} msg={m} />)}
         </div>
       </div>

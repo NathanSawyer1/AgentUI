@@ -1,52 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
-import { getResourceCache, nextResourceGeneration, payloadEqual, setResourceCache, updateResourceCache } from "../lib/memoryCache";
+import { useMemo, useState } from "react";
+import { nextResourceGeneration, setResourceCache, updateResourceCache } from "../lib/memoryCache";
 import { skillSetEnabled, skillsList } from "../lib/openclaw";
 import type { SkillItem } from "../lib/types";
 import { Icon } from "../components/Icons";
+import { RefreshButton, RefreshError, RefreshMeta } from "../components/RefreshStatus";
+import { errorText, useRefreshResource } from "../lib/refreshState";
 
 type SkillFilter = "all" | "ready" | "blocked" | "model";
 const SKILLS_PANEL_CACHE_KEY = "panel:skills";
 
 export function Skills() {
-  const [skills, setSkills] = useState<SkillItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const skillsResource = useRefreshResource<SkillItem[]>({
+    cacheKey: SKILLS_PANEL_CACHE_KEY,
+    load: skillsList,
+  });
+  const skills = skillsResource.data ?? [];
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<SkillFilter>("all");
   const [pending, setPending] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    let cancelled = false;
-    const cached = getResourceCache<SkillItem[]>(SKILLS_PANEL_CACHE_KEY);
-    if (cached?.data) {
-      setSkills(cached.data);
-      setLoading(false);
-    } else {
-      setLoading(true);
-    }
-    setError("");
-    const generation = nextResourceGeneration(SKILLS_PANEL_CACHE_KEY);
-    updateResourceCache<SkillItem[]>(SKILLS_PANEL_CACHE_KEY, { status: "loading", generation });
-    void skillsList()
-      .then((items) => {
-        if (cancelled || !getResourceCache<SkillItem[]>(SKILLS_PANEL_CACHE_KEY) || getResourceCache<SkillItem[]>(SKILLS_PANEL_CACHE_KEY)?.generation !== generation) return;
-        setResourceCache(SKILLS_PANEL_CACHE_KEY, { status: "ready", generation, updatedAt: Date.now(), data: items });
-        setSkills((current) => payloadEqual(current, items) ? current : items);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          const message = err instanceof Error ? err.message : String(err);
-          updateResourceCache<SkillItem[]>(SKILLS_PANEL_CACHE_KEY, { status: "error", generation, error: message });
-          setError(message);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const counts = useMemo(() => ({
     total: skills.length,
@@ -76,15 +47,17 @@ export function Skills() {
       <div className="gateway-head">
         <div>
           <div className="panel-title"><Icon name="tool" size={12} /> Skills</div>
-          <div className="gateway-sub">{loading ? "Loading OpenClaw skills" : `${counts.ready} ready of ${counts.total} installed or bundled`}</div>
+          <div className="gateway-sub">{skillsResource.loading ? "Loading OpenClaw skills" : `${counts.ready} ready of ${counts.total} installed or bundled`}</div>
         </div>
+        <RefreshMeta loading={skillsResource.refreshing} updatedAt={skillsResource.updatedAt} stale={skillsResource.isStale} />
+        <RefreshButton loading={skillsResource.loading || skillsResource.refreshing} onClick={skillsResource.refresh} />
         <div className="skills-search">
           <Icon name="search" size={12} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search skills" />
         </div>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      <RefreshError message={skillsResource.error} stale={skillsResource.isStale} onRetry={skillsResource.refresh} />
 
       <div className="skills-summary">
         <SkillMetric label="Total" value={counts.total} />
@@ -101,9 +74,9 @@ export function Skills() {
       </div>
 
       <div className="skills-list">
-        {loading && <div className="skills-empty">Loading skills...</div>}
-        {!loading && visibleSkills.length === 0 && <div className="skills-empty">No matching skills.</div>}
-        {!loading && visibleSkills.map((skill) => (
+        {skillsResource.loading && <div className="skills-empty">Loading skills...</div>}
+        {!skillsResource.loading && visibleSkills.length === 0 && <div className="skills-empty">No matching skills.</div>}
+        {!skillsResource.loading && visibleSkills.map((skill) => (
           <SkillRow
             key={skill.name}
             skill={skill}
@@ -111,20 +84,19 @@ export function Skills() {
             onToggle={async (nextEnabled) => {
               const previous = skills;
               const optimistic = skills.map((item) => item.name === skill.name ? { ...item, disabled: !nextEnabled } : item);
-              setError("");
               setPending((current) => ({ ...current, [skill.name]: true }));
-              setSkills(optimistic);
+              skillsResource.setData(optimistic);
               updateResourceCache<SkillItem[]>(SKILLS_PANEL_CACHE_KEY, { status: "ready", data: optimistic });
               try {
                 const updated = await skillSetEnabled(skill.name, nextEnabled);
                 if (updated) {
                   setResourceCache(SKILLS_PANEL_CACHE_KEY, { status: "ready", generation: nextResourceGeneration(SKILLS_PANEL_CACHE_KEY), updatedAt: Date.now(), data: updated });
-                  setSkills(updated);
+                  skillsResource.setData(updated);
                 }
               } catch (err) {
-                setSkills(previous);
+                skillsResource.setData(previous);
                 updateResourceCache<SkillItem[]>(SKILLS_PANEL_CACHE_KEY, { status: "ready", data: previous });
-                setError(err instanceof Error ? err.message : String(err));
+                skillsResource.setError(errorText(err));
               } finally {
                 setPending((current) => {
                   const next = { ...current };

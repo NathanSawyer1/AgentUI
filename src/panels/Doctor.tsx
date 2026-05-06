@@ -1,23 +1,15 @@
-import { useEffect, useState } from "react";
 import { doctorStatus } from "../lib/openclaw";
 import type { DoctorReport } from "../lib/types";
 import { Icon } from "../components/Icons";
+import { RefreshButton, RefreshError, RefreshMeta } from "../components/RefreshStatus";
+import { useRefreshResource } from "../lib/refreshState";
 
 export function Doctor() {
-  const [report, setReport] = useState<DoctorReport | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const refresh = () => {
-    setLoading(true);
-    setError("");
-    void doctorStatus()
-      .then(setReport)
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(refresh, []);
+  const doctor = useRefreshResource<DoctorReport>({
+    cacheKey: "panel:doctor",
+    load: doctorStatus,
+  });
+  const report = doctor.data;
 
   return (
     <div className="doctor-panel">
@@ -26,12 +18,11 @@ export function Doctor() {
           <h2>Doctor</h2>
           <div className="gateway-sub">OpenClaw runtime diagnostics</div>
         </div>
-        <button className="panel-btn" onClick={refresh} disabled={loading}>
-          <Icon name={loading ? "spinner" : "cpu"} size={12} />
-          {loading ? "Checking" : "Run checks"}
-        </button>
+        <RefreshMeta loading={doctor.refreshing} updatedAt={doctor.updatedAt} stale={doctor.isStale} />
+        <RefreshButton loading={doctor.loading || doctor.refreshing} onClick={doctor.refresh} label="Run checks" />
       </div>
-      {error && <div className="error-banner inline">{error}</div>}
+      <RefreshError message={doctor.error} stale={doctor.isStale} onRetry={doctor.refresh} />
+      {doctor.loading && !report && <div className="panel-empty"><Icon name="spinner" size={14} /> Running checks...</div>}
       {report && (
         <>
           <div className="gateway-metrics">

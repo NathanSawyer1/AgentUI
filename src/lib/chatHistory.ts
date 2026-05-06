@@ -3,12 +3,13 @@ import type { ChatMessage, HistoryMessage } from "./types";
 export const RECENT_HISTORY_LIMIT = 50;
 export const FULL_HISTORY_LIMIT = 1000;
 
-export type HistoryLoadStatus = "initial" | "hydrating" | "ready" | "error";
+export type HistoryLoadStatus = "initial" | "hydrating" | "refreshing" | "ready" | "error";
 
 export interface HistoryCacheRecord {
   messages: ChatMessage[];
   status: HistoryLoadStatus;
   generation: number;
+  updatedAt?: number;
 }
 
 const historyCache = new Map<string, HistoryCacheRecord>();
@@ -29,6 +30,7 @@ export function updateHistoryCache(sessionId: string, patch: Partial<Omit<Histor
     messages: patch.messages ?? current?.messages ?? [],
     status: patch.status ?? current?.status ?? "initial",
     generation: patch.generation,
+    updatedAt: patch.updatedAt ?? current?.updatedAt,
   };
   setHistoryCache(sessionId, next);
   return next;

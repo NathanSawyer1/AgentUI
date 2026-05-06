@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { DEFAULT_SETTINGS } from "./lib/fixtures";
 import { popoutSession, sessionCreate, settingsGet, settingsSet } from "./lib/openclaw";
 import { normalizeStatusLineItems, STATUS_LINE_SHORT_LABELS } from "./lib/statusLine";
-import { activeTitleFor, createPendingSession, displaySessionTitle, loadPinnedSessions, loadSessionAliases, savePinnedSessions, saveSessionAliases, splitTitleFor, windowTitle } from "./lib/sessionState";
+import { activeTitleFor, createPendingSession, displaySessionTitle, loadPinnedSessions, loadSessionAliases, organizeSessions, splitTitleFor, trySavePinnedSessions, trySaveSessionAliases, windowTitle } from "./lib/sessionState";
 import { startDragging, minimizeWindow, toggleMaximizeWindow, closeWindow } from "./lib/windowControls";
 import { useGatewayPolling, useSessionsPolling, useStatusClock, useWorkspacePolling } from "./lib/usePolling";
 import type { AppSettings, GatewayStatus, SessionInfo, StatusLineItemId, StatusLineItemSetting, WorkspaceStatus } from "./lib/types";
@@ -115,6 +115,28 @@ export function App() {
       });
   };
 
+  const navigate = (view: string) => window.dispatchEvent(new CustomEvent("agentui:navigate", { detail: view }));
+  const toggleTool = (name: "diff" | "terminal") => window.dispatchEvent(new CustomEvent(`agentui:toggle-${name}`));
+  const sessionGroups = organizeSessions(sessions, pinnedSessionIds);
+  const paletteSessionTargets = [...sessionGroups.pinned, ...sessionGroups.recent]
+    .filter((session, index, list) => list.findIndex((candidate) => candidate.id === session.id) === index)
+    .slice(0, 10);
+  const paletteSplitTargets = paletteSessionTargets.filter((session) => session.id !== activeSessionId).slice(0, 8);
+  const sessionPaletteActions = paletteSessionTargets.map((session) => ({
+    id: `session-${session.id}`,
+    icon: pinnedSessionIds.includes(session.id) ? "pin" : "terminal",
+    title: `Open ${displaySessionTitle(session, sessionAliases)}`,
+    detail: `Switch to ${session.id}`,
+    run: () => setActiveSessionId(session.id),
+  }));
+  const splitPaletteActions = paletteSplitTargets.map((session) => ({
+    id: `split-${session.id}`,
+    icon: "split",
+    title: `Split with ${displaySessionTitle(session, sessionAliases)}`,
+    detail: `Open ${session.id} in the secondary pane`,
+    run: () => openSplitWith(session),
+  }));
+
   const commandPaletteActions = [
     {
       id: "new-session",
@@ -144,12 +166,70 @@ export function App() {
       run: () => setSettingsOpen(true),
     },
     {
+      id: "doctor",
+      icon: "cpu",
+      title: "Open Doctor",
+      detail: "Show OpenClaw readiness checks",
+      run: () => navigate("doctor"),
+    },
+    {
+      id: "gateway",
+      icon: "layers",
+      title: "Open Gateway",
+      detail: "Show local gateway status",
+      run: () => navigate("gateway"),
+    },
+    {
+      id: "skills",
+      icon: "tool",
+      title: "Open Skills",
+      detail: "Show installed and bundled skills",
+      run: () => navigate("skills"),
+    },
+    {
+      id: "plugins",
+      icon: "plug",
+      title: "Open Plugins",
+      detail: "Show plugin registry and actions",
+      run: () => navigate("plugins"),
+    },
+    {
+      id: "logs",
+      icon: "list",
+      title: "Open Logs",
+      detail: "Show OpenClaw logs",
+      run: () => navigate("logs"),
+    },
+    {
+      id: "chat",
+      icon: "terminal",
+      title: "Open Chat",
+      detail: "Return to the active session chat",
+      run: () => navigate("chat"),
+    },
+    {
+      id: "toggle-diff",
+      icon: "diff",
+      title: "Toggle Diff",
+      detail: "Open or close the worktree diff viewer",
+      run: () => toggleTool("diff"),
+    },
+    {
+      id: "toggle-terminal",
+      icon: "terminal",
+      title: "Toggle Terminal",
+      detail: "Open or close the command runner",
+      run: () => toggleTool("terminal"),
+    },
+    {
       id: "mock",
       icon: "cpu",
       title: settings.useMock ? "Use live OpenClaw" : "Use mock adapter",
       detail: "Switch between mock data and the configured OpenClaw binary",
       run: () => setSettings((current) => ({ ...current, useMock: !current.useMock })),
     },
+    ...sessionPaletteActions,
+    ...splitPaletteActions,
   ];
 
   const openSplitWith = (session: SessionInfo) => {
@@ -171,7 +251,12 @@ export function App() {
   const renameSession = (sessionId: string, name: string) => {
     setSessionAliases((current) => {
       const next = { ...current, [sessionId]: name };
-      saveSessionAliases(next);
+      const error = trySaveSessionAliases(next);
+      if (error) {
+        setAppError(error);
+        return current;
+      }
+      setAppError("");
       return next;
     });
   };
@@ -179,7 +264,12 @@ export function App() {
   const togglePinSession = (sessionId: string) => {
     setPinnedSessionIds((current) => {
       const next = current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId];
-      savePinnedSessions(next);
+      const error = trySavePinnedSessions(next);
+      if (error) {
+        setAppError(error);
+        return current;
+      }
+      setAppError("");
       return next;
     });
   };

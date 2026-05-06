@@ -61,6 +61,23 @@ export function Session({ onOpenSettings, onSplitWith, onPopoutSession, onCloseS
     };
   }, []);
 
+  useEffect(() => {
+    const onNavigate = (event: Event) => {
+      const view = (event as CustomEvent<NavView>).detail;
+      if (view) setView(view);
+    };
+    const onToggleDiff = () => setDiffOpen((open) => !open);
+    const onToggleTerminal = () => setTerminalOpen((open) => !open);
+    window.addEventListener("agentui:navigate", onNavigate);
+    window.addEventListener("agentui:toggle-diff", onToggleDiff);
+    window.addEventListener("agentui:toggle-terminal", onToggleTerminal);
+    return () => {
+      window.removeEventListener("agentui:navigate", onNavigate);
+      window.removeEventListener("agentui:toggle-diff", onToggleDiff);
+      window.removeEventListener("agentui:toggle-terminal", onToggleTerminal);
+    };
+  }, []);
+
   const mainContent = (() => {
     if (view === "chat") return (
       <>

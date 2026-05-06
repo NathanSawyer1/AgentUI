@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { GatewayStatus, SessionInfo } from "../lib/types";
 import { Icon } from "./Icons";
+import { filterSessions, organizeSessions } from "../lib/sessionState";
 
 export type NavView = "chat" | "gateway" | "skills" | "plugins" | "logs" | "doctor";
 
@@ -26,12 +27,11 @@ export function Sidebar({ onOpenSettings, onSplitWith, onPopoutSession, splitAct
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; session: SessionInfo } | null>(null);
   const [showOlder, setShowOlder] = useState(false);
+  const [sessionQuery, setSessionQuery] = useState("");
   const bars = gateway?.history ?? Array.from({ length: 28 }, () => 14);
+  const visibleSessions = filterSessions(sessions, sessionQuery, sessionAliases);
   const pinnedSet = new Set(pinnedSessionIds);
-  const pinnedSessions = pinnedSessionIds.map((id) => sessions.find((session) => session.id === id)).filter((session): session is SessionInfo => Boolean(session));
-  const unpinnedSessions = sessions.filter((session) => !pinnedSet.has(session.id));
-  const recentSessions = unpinnedSessions.filter(isRecentSession);
-  const olderSessions = unpinnedSessions.filter((session) => !isRecentSession(session));
+  const { pinned: pinnedSessions, recent: recentSessions, older: olderSessions } = organizeSessions(visibleSessions, pinnedSessionIds);
 
   useEffect(() => {
     if (!menu) return;
@@ -71,8 +71,13 @@ export function Sidebar({ onOpenSettings, onSplitWith, onPopoutSession, splitAct
       {onCollapse && <button className="sb-collapse" onClick={onCollapse} title="Collapse sidebar"><Icon name="chevLeft" size={11} /></button>}
       <div className="sb-scroll">
         <div className="sb-label">Sessions <span className="sb-count">{sessions.length || "..."}</span></div>
+        <div className="sb-search">
+          <Icon name="search" size={11} />
+          <input value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} placeholder="Search sessions" />
+        </div>
         <button className="sb-nav sb-action" onClick={onNewSession}><Icon name="plus" size={12} /><span>New session</span></button>
         {sessions.length === 0 && <div className="sb-empty">Fetching sessions...</div>}
+        {sessions.length > 0 && visibleSessions.length === 0 && <div className="sb-empty">No matching sessions.</div>}
         {pinnedSessions.length > 0 && (
           <>
             <div className="sb-label subtle">Pinned <span className="sb-count">{pinnedSessions.length}</span></div>
@@ -139,23 +144,4 @@ function displaySessionName(session: SessionInfo, aliases: SessionAliases) {
 function shortSessionName(name: string) {
   const parts = name.split(":").filter(Boolean);
   return parts[parts.length - 1] || name;
-}
-
-function isRecentSession(session: SessionInfo) {
-  const age = session.ageMs ?? parseAgeLabel(session.time);
-  return age == null || age <= 48 * 60 * 60 * 1000;
-}
-
-function parseAgeLabel(label: string) {
-  const text = label.trim().toLowerCase();
-  if (!text || text === "mock" || text === "new") return null;
-  if (text === "yest" || text === "yesterday") return 24 * 60 * 60 * 1000;
-  const match = text.match(/^(\d+)\s*([smhd])$/);
-  if (!match) return null;
-  const value = Number(match[1]);
-  const unit = match[2];
-  if (unit === "s") return value * 1000;
-  if (unit === "m") return value * 60 * 1000;
-  if (unit === "h") return value * 60 * 60 * 1000;
-  return value * 24 * 60 * 60 * 1000;
 }

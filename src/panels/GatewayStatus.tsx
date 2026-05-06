@@ -1,32 +1,16 @@
-import { useEffect, useState } from "react";
 import { gatewayStatus } from "../lib/openclaw";
 import type { GatewayStatus as GatewayStatusType } from "../lib/types";
 import { Icon } from "../components/Icons";
+import { RefreshButton, RefreshError, RefreshMeta } from "../components/RefreshStatus";
+import { useRefreshResource } from "../lib/refreshState";
 
 export function GatewayStatus() {
-  const [status, setStatus] = useState<GatewayStatusType | null>(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const next = await gatewayStatus();
-        if (!cancelled) {
-          setStatus(next);
-          setError("");
-        }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      }
-    };
-    void load();
-    const timer = window.setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+  const gateway = useRefreshResource<GatewayStatusType>({
+    cacheKey: "panel:gateway",
+    load: gatewayStatus,
+    intervalMs: 5000,
+  });
+  const status = gateway.data;
 
   return (
     <div className="gateway-panel">
@@ -35,9 +19,12 @@ export function GatewayStatus() {
           <div className="panel-title"><Icon name="layers" size={12} /> Gateway Overview</div>
           <div className="gateway-sub">openclaw local gateway status</div>
         </div>
+        <RefreshMeta loading={gateway.refreshing} updatedAt={gateway.updatedAt} stale={gateway.isStale} />
+        <RefreshButton loading={gateway.loading || gateway.refreshing} onClick={gateway.refresh} />
         {status && <div className={"gateway-pill " + status.status}>{status.status} - {status.latency_ms}ms</div>}
       </div>
-      {error && <div className="error-banner">{error}</div>}
+      <RefreshError message={gateway.error} stale={gateway.isStale} onRetry={gateway.refresh} />
+      {gateway.loading && !status && <div className="panel-empty"><Icon name="spinner" size={14} /> Loading gateway status...</div>}
       {status && (
         <>
           <div className="gateway-metrics">

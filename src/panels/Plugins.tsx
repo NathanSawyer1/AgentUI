@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
-import { getResourceCache, nextResourceGeneration, payloadEqual, setResourceCache, updateResourceCache } from "../lib/memoryCache";
+import { useMemo, useState } from "react";
+import { nextResourceGeneration, setResourceCache, updateResourceCache } from "../lib/memoryCache";
 import { pluginInstall, pluginSetEnabled, pluginUninstall, pluginUninstallPreview, pluginUpdate, pluginsList, pluginsSearch } from "../lib/openclaw";
 import type { PluginItem, PluginSearchResult } from "../lib/types";
 import { Icon } from "../components/Icons";
+import { RefreshButton, RefreshError, RefreshMeta } from "../components/RefreshStatus";
+import { errorText, useRefreshResource } from "../lib/refreshState";
 
 type PluginFilter = "all" | "loaded" | "disabled" | "issues";
 type PendingKey = "install" | "search" | "update-all" | string;
 const PLUGINS_PANEL_CACHE_KEY = "panel:plugins";
 
 export function Plugins() {
-  const [plugins, setPlugins] = useState<PluginItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const pluginsResource = useRefreshResource<PluginItem[]>({
+    cacheKey: PLUGINS_PANEL_CACHE_KEY,
+    load: pluginsList,
+  });
+  const plugins = pluginsResource.data ?? [];
   const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PluginFilter>("all");
@@ -24,41 +28,8 @@ export function Plugins() {
   const refresh = async () => {
     const items = await pluginsList();
     setResourceCache(PLUGINS_PANEL_CACHE_KEY, { status: "ready", generation: nextResourceGeneration(PLUGINS_PANEL_CACHE_KEY), updatedAt: Date.now(), data: items });
-    setPlugins((current) => payloadEqual(current, items) ? current : items);
+    pluginsResource.setData(items);
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    const cached = getResourceCache<PluginItem[]>(PLUGINS_PANEL_CACHE_KEY);
-    if (cached?.data) {
-      setPlugins(cached.data);
-      setLoading(false);
-    } else {
-      setLoading(true);
-    }
-    setError("");
-    const generation = nextResourceGeneration(PLUGINS_PANEL_CACHE_KEY);
-    updateResourceCache<PluginItem[]>(PLUGINS_PANEL_CACHE_KEY, { status: "loading", generation });
-    void pluginsList()
-      .then((items) => {
-        if (cancelled || getResourceCache<PluginItem[]>(PLUGINS_PANEL_CACHE_KEY)?.generation !== generation) return;
-        setResourceCache(PLUGINS_PANEL_CACHE_KEY, { status: "ready", generation, updatedAt: Date.now(), data: items });
-        setPlugins((current) => payloadEqual(current, items) ? current : items);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          const message = errorText(err);
-          updateResourceCache<PluginItem[]>(PLUGINS_PANEL_CACHE_KEY, { status: "error", generation, error: message });
-          setError(message);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const counts = useMemo(() => ({
     total: plugins.length,
@@ -100,13 +71,13 @@ export function Plugins() {
   const runClawHubSearch = async () => {
     const needle = searchQuery.trim();
     if (!needle) return;
-    setError("");
+    pluginsResource.setError("");
     setNotice("");
     setActionPending("search", true);
     try {
       setSearchResults(await pluginsSearch(needle, 8));
     } catch (err) {
-      setError(errorText(err));
+      pluginsResource.setError(errorText(err));
       setSearchResults([]);
     } finally {
       setActionPending("search", false);
@@ -116,7 +87,7 @@ export function Plugins() {
   const installSpec = async (spec: string) => {
     const trimmed = spec.trim();
     if (!trimmed) return;
-    setError("");
+    pluginsResource.setError("");
     setNotice("");
     setActionPending(`install:${trimmed}`, true);
     try {
@@ -124,7 +95,7 @@ export function Plugins() {
       setRawSpec("");
       await afterMutation(result.output);
     } catch (err) {
-      setError(errorText(err));
+      pluginsResource.setError(errorText(err));
     } finally {
       setActionPending(`install:${trimmed}`, false);
     }
@@ -135,15 +106,17 @@ export function Plugins() {
       <div className="gateway-head">
         <div>
           <div className="panel-title"><Icon name="plug" size={12} /> Plugins</div>
-          <div className="gateway-sub">{loading ? "Loading OpenClaw plugins" : `${counts.loaded} loaded of ${counts.total} installed or bundled`}</div>
+          <div className="gateway-sub">{pluginsResource.loading ? "Loading OpenClaw plugins" : `${counts.loaded} loaded of ${counts.total} installed or bundled`}</div>
         </div>
+        <RefreshMeta loading={pluginsResource.refreshing} updatedAt={pluginsResource.updatedAt} stale={pluginsResource.isStale} />
+        <RefreshButton loading={pluginsResource.loading || pluginsResource.refreshing} onClick={pluginsResource.refresh} />
         <div className="skills-search">
           <Icon name="search" size={12} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search plugins" />
         </div>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      <RefreshError message={pluginsResource.error} stale={pluginsResource.isStale} onRetry={pluginsResource.refresh} />
       {notice && <div className="plugin-notice">{notice}</div>}
 
       <div className="skills-summary">
@@ -189,14 +162,14 @@ export function Plugins() {
             disabled={pending["update-all"]}
             type="button"
             onClick={async () => {
-              setError("");
+              pluginsResource.setError("");
               setNotice("");
               setActionPending("update-all", true);
               try {
                 const result = await pluginUpdate();
                 await afterMutation(result.output);
               } catch (err) {
-                setError(errorText(err));
+                pluginsResource.setError(errorText(err));
               } finally {
                 setActionPending("update-all", false);
               }
@@ -215,55 +188,55 @@ export function Plugins() {
       </div>
 
       <div className="skills-list">
-        {loading && <div className="skills-empty">Loading plugins...</div>}
-        {!loading && visiblePlugins.length === 0 && <div className="skills-empty">No matching plugins.</div>}
-        {!loading && visiblePlugins.map((plugin) => (
+        {pluginsResource.loading && <div className="skills-empty">Loading plugins...</div>}
+        {!pluginsResource.loading && visiblePlugins.length === 0 && <div className="skills-empty">No matching plugins.</div>}
+        {!pluginsResource.loading && visiblePlugins.map((plugin) => (
           <PluginRow
             key={plugin.id}
             plugin={plugin}
             pending={pending[plugin.id]}
             onToggle={async (nextEnabled) => {
               const previous = plugins;
-              setError("");
+              pluginsResource.setError("");
               setNotice("");
               setActionPending(plugin.id, true);
               const optimistic = plugins.map((item) => item.id === plugin.id ? { ...item, enabled: nextEnabled, status: nextEnabled ? "loaded" : "disabled" } : item);
-              setPlugins(optimistic);
+              pluginsResource.setData(optimistic);
               updateResourceCache<PluginItem[]>(PLUGINS_PANEL_CACHE_KEY, { status: "ready", data: optimistic });
               try {
                 const updated = await pluginSetEnabled(plugin.id, nextEnabled);
                 setResourceCache(PLUGINS_PANEL_CACHE_KEY, { status: "ready", generation: nextResourceGeneration(PLUGINS_PANEL_CACHE_KEY), updatedAt: Date.now(), data: updated });
-                setPlugins(updated);
+                pluginsResource.setData(updated);
               } catch (err) {
-                setPlugins(previous);
+                pluginsResource.setData(previous);
                 updateResourceCache<PluginItem[]>(PLUGINS_PANEL_CACHE_KEY, { status: "ready", data: previous });
-                setError(errorText(err));
+                pluginsResource.setError(errorText(err));
               } finally {
                 setActionPending(plugin.id, false);
               }
             }}
             onUpdate={async () => {
-              setError("");
+              pluginsResource.setError("");
               setNotice("");
               setActionPending(`update:${plugin.id}`, true);
               try {
                 const result = await pluginUpdate(plugin.id);
                 await afterMutation(result.output);
               } catch (err) {
-                setError(errorText(err));
+                pluginsResource.setError(errorText(err));
               } finally {
                 setActionPending(`update:${plugin.id}`, false);
               }
             }}
             onUninstallPreview={async () => {
-              setError("");
+              pluginsResource.setError("");
               setNotice("");
               setActionPending(`uninstall:${plugin.id}`, true);
               try {
                 const result = await pluginUninstallPreview(plugin.id);
                 setUninstall({ plugin, preview: result.output || "No changes reported by dry run." });
               } catch (err) {
-                setError(errorText(err));
+                pluginsResource.setError(errorText(err));
               } finally {
                 setActionPending(`uninstall:${plugin.id}`, false);
               }
@@ -288,13 +261,13 @@ export function Plugins() {
                 onClick={async () => {
                   const id = uninstall.plugin.id;
                   setActionPending(`confirm-uninstall:${id}`, true);
-                  setError("");
+                  pluginsResource.setError("");
                   try {
                     const result = await pluginUninstall(id);
                     setUninstall(null);
                     await afterMutation(result.output);
                   } catch (err) {
-                    setError(errorText(err));
+                    pluginsResource.setError(errorText(err));
                   } finally {
                     setActionPending(`confirm-uninstall:${id}`, false);
                   }
@@ -448,8 +421,4 @@ function searchableText(plugin: PluginItem) {
 
 function restartHint(output: string) {
   return /restart|reload|gateway/i.test(output) ? output : "";
-}
-
-function errorText(err: unknown) {
-  return err instanceof Error ? err.message : String(err);
 }
