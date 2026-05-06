@@ -4,6 +4,7 @@ import { diffFiles, diffPatch } from "../lib/openclaw";
 import type { DiffFile, DiffRow } from "../lib/types";
 import { Icon } from "../components/Icons";
 import { RefreshButton, RefreshError, RefreshMeta } from "../components/RefreshStatus";
+import { filterDiffFiles, patchTextForClipboard } from "../lib/diffViewerState";
 
 export function DiffViewer({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -16,7 +17,7 @@ export function DiffViewer({ onClose }: { onClose: () => void }) {
   const [stale, setStale] = useState(false);
   const [query, setQuery] = useState("");
   const active = files.find((f) => f.path === activeFile);
-  const visibleFiles = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(query.trim().toLowerCase())), [files, query]);
+  const visibleFiles = useMemo(() => filterDiffFiles(files, query), [files, query]);
 
   useEffect(() => {
     if (visibleFiles.length > 0 && !visibleFiles.some((file) => file.path === activeFile)) {
@@ -114,7 +115,7 @@ export function DiffViewer({ onClose }: { onClose: () => void }) {
         <RefreshMeta loading={loadingFiles && files.length > 0} updatedAt={updatedAt} stale={stale} />
         <RefreshButton loading={loadingFiles} onClick={refreshFiles} />
         {activeFile && <button className="panel-btn" onClick={() => void navigator.clipboard?.writeText(activeFile).catch(() => undefined)} title="Copy file path"><Icon name="file" size={12} /></button>}
-        {activeFile && <button className="panel-btn" onClick={() => void navigator.clipboard?.writeText(getDiffPatchCache(activeFile)?.patch ?? rows.map((row) => "type" in row ? row.label : row.nw.code || row.old.code).join("\n")).catch(() => undefined)} title="Copy patch"><Icon name="code" size={12} /></button>}
+        {activeFile && <button className="panel-btn" onClick={() => void navigator.clipboard?.writeText(patchTextForClipboard(getDiffPatchCache(activeFile)?.patch, rows)).catch(() => undefined)} title="Copy patch"><Icon name="code" size={12} /></button>}
         <button className="panel-btn" onClick={onClose} title="Close"><Icon name="x" size={12} /></button>
       </div>
       <RefreshError message={error} stale={stale} onRetry={refreshFiles} />

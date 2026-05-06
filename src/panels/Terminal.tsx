@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { listenTerminal, terminalCancel, terminalRun } from "../lib/openclaw";
+import { listenTerminal, terminalCancel, terminalRun, workspaceStatus } from "../lib/openclaw";
 import type { TermLine } from "../lib/types";
 import { Icon } from "../components/Icons";
+import { nextRecentCommands, terminalExitLine, workspaceCwdLabel } from "../lib/terminalState";
 
 interface TerminalProps {
   onClose: () => void;
@@ -16,6 +17,7 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
   const [lines, setLines] = useState<TermLine[]>([{ kind: "info", text: "Command runner - sh -lc in the workspace cwd" }]);
   const [runId, setRunId] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
+  const [cwd, setCwd] = useState(".");
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const acceptNextRunRef = useRef(false);
   const completedRunsRef = useRef(new Set<string>());
@@ -24,6 +26,16 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
   useEffect(() => {
     runIdRef.current = runId;
   }, [runId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void workspaceStatus()
+      .then((workspace) => {
+        if (!cancelled) setCwd(workspaceCwdLabel(workspace));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -39,7 +51,7 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
           setLines((current) => [...current, { kind: "err", text: event.error }]);
         }
         if (event.done) {
-          setLines((current) => [...current, { kind: event.exitCode === 0 ? "ok" : "warn", text: `process exited ${event.exitCode ?? "unknown"}` }]);
+          setLines((current) => [...current, terminalExitLine(event.exitCode)]);
           completedRunsRef.current.add(event.runId);
           return null;
         }
@@ -70,11 +82,11 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
   const runCommandText = async (command: string) => {
     if (!command || runId) return;
     setInput("");
-    setRecent((current) => [command, ...current.filter((item) => item !== command)].slice(0, 6));
-    setLines((current) => [...current, { kind: "prompt", cwd: ".", cmd: command }]);
+    setRecent((current) => nextRecentCommands(current, command));
+    setLines((current) => [...current, { kind: "prompt", cwd, cmd: command }]);
     acceptNextRunRef.current = true;
     try {
-      const started = await terminalRun(command);
+      const started = await terminalRun(command, cwd === "." ? undefined : cwd);
       setRunId((current) => current ?? (completedRunsRef.current.has(started.runId) ? null : started.runId));
     } catch (error) {
       acceptNextRunRef.current = false;
@@ -113,7 +125,7 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
           return <div key={i} className="term-line"><span className={cls}>{l.text || "\u00A0"}</span></div>;
         })}
         <div className="term-line">
-          <span className="cwd">.</span>
+          <span className="cwd">{cwd}</span>
           <span className="prompt">&gt;</span>
           <input value={input} disabled={Boolean(runId)} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void runCmd(); }} style={{ flex: 1, color: "var(--fg-0)" }} autoFocus />
         </div>

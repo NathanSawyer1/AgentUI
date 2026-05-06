@@ -44,12 +44,12 @@ Several debugging upgrades are already implemented. Remaining follow-up:
 
 - Diff Viewer:
   - Binary-file and renamed-file labels are implemented.
-  - Add tests for file filtering and copy-patch fallback behavior.
+  - File filtering and copy-patch fallback behavior are covered by tests.
   - Verify copy path/patch in Tauri runtime, not only browser build.
 - Terminal:
-  - Add cwd display from workspace status instead of hardcoded `.` where possible.
-  - Add tests for recent command/rerun state helpers if extracted.
-  - Add clearer command failure summaries for non-zero exits.
+  - Cwd display uses workspace status instead of hardcoded `.` where possible.
+  - Recent command/rerun state helpers are extracted and covered by tests.
+  - Non-zero exits show clearer command failure summaries.
 - Logs:
   - Add export-to-file if needed after copy-visible logs is validated.
   - Add tests for level filter UI state if the logic is extracted.
