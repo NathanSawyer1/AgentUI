@@ -24,6 +24,13 @@ The `tauri:dev` script automatically prepends `.rust/cargo/bin` to PATH so the b
 npm run tauri:build
 ```
 
+## Project docs
+
+- [4-week production roadmap](./docs/ROADMAP.md)
+- [Linux release checklist](./docs/RELEASE_LINUX.md)
+- [Troubleshooting](./docs/TROUBLESHOOTING.md)
+- [Manual smoke checklist](./docs/SMOKE_CHECKLIST.md)
+
 ## Env vars
 
 | Variable | Default | Purpose |

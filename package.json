@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "cargo:check": "PATH=\"$PWD/.rust/cargo/bin:$PATH\" CARGO_HOME=\"$PWD/.rust/cargo\" RUSTUP_HOME=\"$PWD/.rust/rustup\" cargo check --manifest-path src-tauri/Cargo.toml",
+    "cargo:test": "PATH=\"$PWD/.rust/cargo/bin:$PATH\" CARGO_HOME=\"$PWD/.rust/cargo\" RUSTUP_HOME=\"$PWD/.rust/rustup\" cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri:dev": "PATH=\"$PWD/.rust/cargo/bin:$PATH\" CARGO_HOME=\"$PWD/.rust/cargo\" RUSTUP_HOME=\"$PWD/.rust/rustup\" tauri dev",
+    "tauri:build:deb": "PATH=\"$PWD/.rust/cargo/bin:$PATH\" CARGO_HOME=\"$PWD/.rust/cargo\" RUSTUP_HOME=\"$PWD/.rust/rustup\" tauri build --bundles deb",
     "tauri:build": "PATH=\"$PWD/.rust/cargo/bin:$PATH\" CARGO_HOME=\"$PWD/.rust/cargo\" RUSTUP_HOME=\"$PWD/.rust/rustup\" tauri build"
   },
   "dependencies": {
