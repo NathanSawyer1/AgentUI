@@ -180,6 +180,8 @@ export interface DiffFile {
   adds: number;
   dels: number;
   active?: boolean;
+  binary?: boolean;
+  oldPath?: string;
 }
 
 export interface DiffPatch {

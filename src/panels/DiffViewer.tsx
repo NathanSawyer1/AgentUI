@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { activePathAfterRefresh, getDiffFilesCache, getDiffPatchCache, isPatchGenerationCurrent, markPatchLoading, nextPatchGeneration, prefetchCandidates, setDiffFilesCache, setDiffPatchCache } from "../lib/diffCache";
 import { diffFiles, diffPatch } from "../lib/openclaw";
 import type { DiffFile, DiffRow } from "../lib/types";
 import { Icon } from "../components/Icons";
+import { RefreshButton, RefreshError, RefreshMeta } from "../components/RefreshStatus";
 
 export function DiffViewer({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -11,29 +12,52 @@ export function DiffViewer({ onClose }: { onClose: () => void }) {
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingPatch, setLoadingPatch] = useState(false);
   const [error, setError] = useState("");
+  const [updatedAt, setUpdatedAt] = useState<number | undefined>(() => getDiffFilesCache()?.updatedAt);
+  const [stale, setStale] = useState(false);
+  const [query, setQuery] = useState("");
   const active = files.find((f) => f.path === activeFile);
+  const visibleFiles = useMemo(() => files.filter((file) => file.path.toLowerCase().includes(query.trim().toLowerCase())), [files, query]);
 
   useEffect(() => {
+    if (visibleFiles.length > 0 && !visibleFiles.some((file) => file.path === activeFile)) {
+      setActiveFile(visibleFiles[0].path);
+    }
+  }, [activeFile, visibleFiles]);
+
+  const refreshFiles = useCallback(() => {
     let cancelled = false;
+    setLoadingFiles(true);
+    setError("");
+    setStale(false);
+    void diffFiles()
+      .then((items) => {
+        if (cancelled) return;
+        const record = setDiffFilesCache(items);
+        setFiles(items);
+        setUpdatedAt(record.updatedAt);
+        setStale(false);
+        setActiveFile((current) => activePathAfterRefresh(current, items));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setStale(files.length > 0);
+      })
+      .finally(() => !cancelled && setLoadingFiles(false));
+    return () => { cancelled = true; };
+  }, [files.length]);
+
+  useEffect(() => {
     const cached = getDiffFilesCache();
     if (cached?.files.length) {
       setFiles(cached.files);
+      setUpdatedAt(cached.updatedAt);
       setActiveFile((current) => activePathAfterRefresh(current, cached.files));
       setLoadingFiles(false);
     } else {
       setLoadingFiles(true);
     }
-    setError("");
-    void diffFiles()
-      .then((items) => {
-        if (cancelled) return;
-        setDiffFilesCache(items);
-        setFiles(items);
-        setActiveFile((current) => activePathAfterRefresh(current, items));
-      })
-      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => !cancelled && setLoadingFiles(false));
-    return () => { cancelled = true; };
+    return refreshFiles();
   }, []);
 
   useEffect(() => {
@@ -58,7 +82,12 @@ export function DiffViewer({ onClose }: { onClose: () => void }) {
         const record = setDiffPatchCache(activeFile, patch.patch, generation);
         setRows(record.rows);
       })
-      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+          setStale(rows.length > 0);
+        }
+      })
       .finally(() => !cancelled && setLoadingPatch(false));
     return () => { cancelled = true; };
   }, [activeFile]);
@@ -82,31 +111,49 @@ export function DiffViewer({ onClose }: { onClose: () => void }) {
       <div className="panel-head">
         <div className="panel-title"><Icon name="diff" size={12} /> Diff Viewer</div>
         <div className="panel-spacer"></div>
+        <RefreshMeta loading={loadingFiles && files.length > 0} updatedAt={updatedAt} stale={stale} />
+        <RefreshButton loading={loadingFiles} onClick={refreshFiles} />
+        {activeFile && <button className="panel-btn" onClick={() => void navigator.clipboard?.writeText(activeFile).catch(() => undefined)} title="Copy file path"><Icon name="file" size={12} /></button>}
+        {activeFile && <button className="panel-btn" onClick={() => void navigator.clipboard?.writeText(getDiffPatchCache(activeFile)?.patch ?? rows.map((row) => "type" in row ? row.label : row.nw.code || row.old.code).join("\n")).catch(() => undefined)} title="Copy patch"><Icon name="code" size={12} /></button>}
         <button className="panel-btn" onClick={onClose} title="Close"><Icon name="x" size={12} /></button>
       </div>
+      <RefreshError message={error} stale={stale} onRetry={refreshFiles} />
       {loadingFiles ? (
         <div className="panel-empty"><Icon name="spinner" size={14} /> Loading worktree diff...</div>
-      ) : error ? (
+      ) : error && !files.length ? (
         <div className="panel-empty error"><Icon name="x" size={14} /> {error}</div>
       ) : files.length === 0 ? (
         <div className="panel-empty"><Icon name="check" size={14} /> No worktree changes.</div>
       ) : (
         <>
+          <div className="diff-filter">
+            <Icon name="search" size={12} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter files" />
+          </div>
           <div className="diff-tabs">
-            {files.map((f) => (
+            {visibleFiles.map((f) => (
               <button key={f.path} className={"diff-tab" + (activeFile === f.path ? " active" : "")} onClick={() => setActiveFile(f.path)}>
                 <Icon name="file" size={10} />
                 <span>{f.path.split("/").pop()}</span>
+                {f.binary && <span className="badge warn">binary</span>}
+                {f.oldPath && <span className="badge">renamed</span>}
                 <span className="badge">+{f.adds} -{f.dels}</span>
               </button>
             ))}
+            {visibleFiles.length === 0 && <div className="panel-empty compact">No matching files.</div>}
           </div>
-          <div className="diff-file" title={activeFile}>
-            <Icon name="folder" size={10} />
-            <span className="path">{activeFile}</span>
-            {active && <><span className="adds">+{active.adds}</span><span className="dels">-{active.dels}</span></>}
-          </div>
-          {loadingPatch && rows.length === 0 ? <div className="panel-empty"><Icon name="spinner" size={14} /> Loading patch...</div> : <SplitDiff rows={rows} />}
+          {visibleFiles.length > 0 && (
+            <>
+              <div className="diff-file" title={activeFile}>
+                <Icon name="folder" size={10} />
+                <span className="path">{activeFile}</span>
+                {active?.binary && <span className="diff-label warn">binary</span>}
+                {active?.oldPath && <span className="diff-label">renamed from {active.oldPath}</span>}
+                {active && <><span className="adds">+{active.adds}</span><span className="dels">-{active.dels}</span></>}
+              </div>
+              {loadingPatch && rows.length === 0 ? <div className="panel-empty"><Icon name="spinner" size={14} /> Loading patch...</div> : <SplitDiff rows={rows} />}
+            </>
+          )}
         </>
       )}
     </div>

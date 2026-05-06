@@ -7,7 +7,7 @@ use commands::{
     diff_patch, doctor_status, gateway_status, logs_stop, logs_tail, models_list, plugin_install,
     plugin_set_enabled, plugin_uninstall, plugin_uninstall_preview, plugin_update, plugins_list,
     plugins_search, session_create, session_history, session_popout, sessions_list, settings_get,
-    settings_set, skill_set_enabled, skills_list, slash_commands_list, terminal_cancel,
+    settings_set, skill_set_enabled, skills_list, slash_commands_list, stop_all_processes, terminal_cancel,
     terminal_run, window_close, window_minimize, window_start_dragging, window_toggle_maximize,
     workspace_status, AppState,
 };
@@ -71,6 +71,8 @@ fn main() {
                 && matches!(event, tauri::WindowEvent::CloseRequested { .. })
             {
                 close_session_popouts(window.app_handle());
+                let state = window.app_handle().state::<AppState>();
+                stop_all_processes(&state.process_runs);
             }
         })
         .run(tauri::generate_context!())

@@ -279,6 +279,10 @@ pub struct DiffFile {
     pub path: String,
     pub adds: u64,
     pub dels: u64,
+    #[serde(default)]
+    pub binary: bool,
+    #[serde(rename = "oldPath", skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

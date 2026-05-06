@@ -12,4 +12,9 @@ describe("parseUnifiedPatch", () => {
   it("handles empty diffs", () => {
     expect(parseUnifiedPatch("")).toEqual([]);
   });
+
+  it("ignores binary patch headers without fabricating rows", () => {
+    const rows = parseUnifiedPatch("diff --git a/a.png b/a.png\nBinary files a/a.png and b/a.png differ");
+    expect(rows).toEqual([]);
+  });
 });

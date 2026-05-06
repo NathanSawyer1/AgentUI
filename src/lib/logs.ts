@@ -1,6 +1,7 @@
 export interface LogLine {
   text: string;
   level?: string;
+  malformed?: boolean;
 }
 
 export const INITIAL_LOG_LIMIT = 80;
@@ -32,10 +33,33 @@ export function mergeHydratedLogs(current: LogLine[], hydrated: LogLine[], cap =
   return [...current, ...hydrated.slice(overlap)].slice(-cap);
 }
 
-export function filterLogs(lines: LogLine[], query: string): LogLine[] {
+export type LogLevelFilter = "all" | "error" | "warn" | "info" | "debug" | "malformed";
+
+export function normalizeLogLevel(level?: string): string {
+  const text = (level || "").trim().toLowerCase();
+  if (["error", "err", "fatal"].includes(text)) return "error";
+  if (["warn", "warning"].includes(text)) return "warn";
+  if (["info", "notice"].includes(text)) return "info";
+  if (["debug", "trace"].includes(text)) return "debug";
+  return text;
+}
+
+export function logLineFromEventLine(text: string, level?: string, recordPresent = true): LogLine {
+  const trimmed = text.trim();
+  const malformed = !recordPresent && (trimmed.startsWith("{") || trimmed.startsWith("["));
+  return { text, level: malformed ? "malformed" : normalizeLogLevel(level), malformed };
+}
+
+export function filterLogs(lines: LogLine[], query: string, level: LogLevelFilter = "all"): LogLine[] {
   const needle = query.trim().toLowerCase();
-  if (!needle) return lines;
-  return lines.filter((line) => line.text.toLowerCase().includes(needle));
+  if (!needle && level === "all") return lines;
+  return lines.filter((line) => {
+    if (level !== "all") {
+      if (level === "malformed" && !line.malformed) return false;
+      if (level !== "malformed" && normalizeLogLevel(line.level) !== level) return false;
+    }
+    return !needle || line.text.toLowerCase().includes(needle);
+  });
 }
 
 export function shouldStickToBottom(scrollTop: number, clientHeight: number, scrollHeight: number): boolean {

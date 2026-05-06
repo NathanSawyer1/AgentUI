@@ -15,9 +15,15 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<TermLine[]>([{ kind: "info", text: "Command runner - sh -lc in the workspace cwd" }]);
   const [runId, setRunId] = useState<string | null>(null);
+  const [recent, setRecent] = useState<string[]>([]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const acceptNextRunRef = useRef(false);
   const completedRunsRef = useRef(new Set<string>());
+  const runIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    runIdRef.current = runId;
+  }, [runId]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -40,7 +46,11 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
         return event.runId;
       });
     }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      const id = runIdRef.current;
+      if (id) void terminalCancel(id).catch(() => undefined);
+    };
   }, []);
 
   useEffect(() => {
@@ -49,8 +59,18 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
 
   const runCmd = async () => {
     const command = input.trim();
+    await runCommandText(command);
+  };
+
+  const rerun = (command: string) => {
+    if (runId) return;
+    void runCommandText(command);
+  };
+
+  const runCommandText = async (command: string) => {
     if (!command || runId) return;
     setInput("");
+    setRecent((current) => [command, ...current.filter((item) => item !== command)].slice(0, 6));
     setLines((current) => [...current, { kind: "prompt", cwd: ".", cmd: command }]);
     acceptNextRunRef.current = true;
     try {
@@ -75,9 +95,11 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
       <div className="term-resize-top"></div>
       <div className="term-head">
         <div className="term-tabs">
-          <div className="term-tab active"><Icon name="terminal" size={10} /><span>command runner</span></div>
+          <div className="term-tab active"><Icon name="terminal" size={10} /><span>{runId ? "running" : "command runner"}</span></div>
         </div>
         <div className="panel-spacer"></div>
+        <button className="panel-btn text" onClick={() => void navigator.clipboard?.writeText(lines.map((line) => line.kind === "prompt" ? `${line.cwd ?? "."} > ${line.cmd ?? ""}` : line.text ?? "").join("\n")).catch(() => undefined)} title="Copy output">Copy</button>
+        {recent[0] && <button className="panel-btn text" disabled={Boolean(runId)} onClick={() => rerun(recent[0])} title="Rerun last command">Rerun</button>}
         {runId && <button className="panel-btn" onClick={cancel} title="Cancel command"><Icon name="x" size={12} /></button>}
         <button className="panel-btn" onClick={onTogglePlacement} title={placement === "bottom" ? "Dock right" : "Dock bottom"}><Icon name="split" size={12} /></button>
         <button className="panel-btn" onClick={onClose} title="Close"><Icon name="x" size={12} /></button>
@@ -95,6 +117,11 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
           <span className="prompt">&gt;</span>
           <input value={input} disabled={Boolean(runId)} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void runCmd(); }} style={{ flex: 1, color: "var(--fg-0)" }} autoFocus />
         </div>
+        {!runId && recent.length > 0 && (
+          <div className="term-recent">
+            {recent.map((command) => <button key={command} onClick={() => rerun(command)}>{command}</button>)}
+          </div>
+        )}
       </div>
     </div>
   );

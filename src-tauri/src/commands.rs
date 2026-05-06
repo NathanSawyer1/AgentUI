@@ -152,6 +152,10 @@ fn path_name(path: &str) -> Option<String> {
         .map(|name| name.to_string_lossy().to_string())
 }
 
+fn command_available(command: &str) -> bool {
+    which::which(command).is_ok()
+}
+
 #[tauri::command]
 pub async fn workspace_status() -> Result<WorkspaceStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -270,6 +274,60 @@ pub async fn doctor_status(state: State<'_, AppState>) -> Result<DoctorReport, S
                 "OPENCLAW_GATEWAY_TOKEN is not set".into()
             },
         ));
+
+        match std::env::current_dir() {
+            Ok(cwd) => checks.push(doctor_check(
+                "cwd",
+                "Current workspace",
+                "ok",
+                cwd.to_string_lossy().to_string(),
+            )),
+            Err(error) => checks.push(doctor_check(
+                "cwd",
+                "Current workspace",
+                "err",
+                format!("Could not read current directory: {error}"),
+            )),
+        }
+
+        let git_available = command_available("git");
+        checks.push(doctor_check(
+            "cmd-git",
+            "git command",
+            if git_available { "ok" } else { "warn" },
+            if git_available {
+                "git is available for workspace status and diff views".into()
+            } else {
+                "git was not found on PATH; workspace and diff views will be limited".into()
+            },
+        ));
+
+        checks.push(doctor_check(
+            "cmd-sh",
+            "shell command",
+            if command_available("sh") { "ok" } else { "err" },
+            if command_available("sh") {
+                "sh is available for terminal command runs".into()
+            } else {
+                "sh was not found on PATH; terminal command runs cannot start".into()
+            },
+        ));
+
+        if let Ok(cwd) = std::env::current_dir() {
+            let git_root = command_text(
+                Command::new("git")
+                    .args(["rev-parse", "--show-toplevel"])
+                    .current_dir(&cwd),
+            );
+            checks.push(doctor_check(
+                "git-worktree",
+                "Git worktree",
+                if git_root.is_some() { "ok" } else { "warn" },
+                git_root.unwrap_or_else(|| {
+                    "Current directory is not a Git worktree; diff and Git status will be empty".into()
+                }),
+            ));
+        }
 
         match adapter.gateway_status() {
             Ok(status) => checks.push(doctor_check(
@@ -534,30 +592,38 @@ fn parse_numstat_line(line: &str) -> Option<DiffFile> {
     if path.trim().is_empty() {
         return None;
     }
-    let path = normalize_numstat_path(&path);
+    let (path, old_path) = normalize_numstat_path(&path);
     Some(DiffFile {
         path,
         adds: adds.parse().unwrap_or(0),
         dels: dels.parse().unwrap_or(0),
+        binary: adds == "-" || dels == "-",
+        old_path,
     })
 }
 
-fn normalize_numstat_path(path: &str) -> String {
+fn normalize_numstat_path(path: &str) -> (String, Option<String>) {
     let trimmed = path.trim();
     if let (Some(open), Some(close)) = (trimmed.find('{'), trimmed.rfind('}')) {
         if open < close {
             let prefix = &trimmed[..open];
             let suffix = &trimmed[close + 1..];
             let inner = &trimmed[open + 1..close];
-            if let Some((_, new_name)) = inner.split_once(" => ") {
-                return format!("{prefix}{new_name}{suffix}");
+            if let Some((old_name, new_name)) = inner.split_once(" => ") {
+                return (
+                    format!("{prefix}{new_name}{suffix}"),
+                    Some(format!("{prefix}{old_name}{suffix}")),
+                );
             }
         }
     }
-    if let Some((_, new_path)) = trimmed.rsplit_once(" => ") {
-        return new_path.trim_matches(['{', '}']).to_string();
+    if let Some((old_path, new_path)) = trimmed.rsplit_once(" => ") {
+        return (
+            new_path.trim_matches(['{', '}']).to_string(),
+            Some(old_path.trim_matches(['{', '}']).to_string()),
+        );
     }
-    trimmed.to_string()
+    (trimmed.to_string(), None)
 }
 
 #[tauri::command]
@@ -829,6 +895,14 @@ pub fn close_session_popouts(app: &AppHandle) {
     }
 }
 
+pub fn stop_all_processes(runs: &ProcessRuns) {
+    if let Ok(mut processes) = lock_process_runs(runs) {
+        for (_, mut child) in processes.drain() {
+            let _ = child.kill();
+        }
+    }
+}
+
 fn url_encode(input: &str) -> String {
     let mut encoded = String::new();
     for byte in input.bytes() {
@@ -909,6 +983,8 @@ mod tests {
         assert_eq!(file.path, "src/main.rs");
         assert_eq!(file.adds, 12);
         assert_eq!(file.dels, 3);
+        assert!(!file.binary);
+        assert_eq!(file.old_path, None);
     }
 
     #[test]
@@ -916,6 +992,7 @@ mod tests {
         let file = parse_numstat_line("4\t0\tsrc/{old.rs => new.rs}").unwrap();
 
         assert_eq!(file.path, "src/new.rs");
+        assert_eq!(file.old_path.as_deref(), Some("src/old.rs"));
         assert_eq!(file.adds, 4);
         assert_eq!(file.dels, 0);
     }
@@ -927,6 +1004,7 @@ mod tests {
         assert_eq!(file.path, "assets/icon.png");
         assert_eq!(file.adds, 0);
         assert_eq!(file.dels, 0);
+        assert!(file.binary);
     }
 
     #[test]
