@@ -1254,6 +1254,21 @@ input, textarea {
 }
 .cb-send:hover { filter: brightness(1.1); }
 .cb-send:disabled { background: var(--bg-3); color: var(--fg-4); cursor: not-allowed; }
+.composer-state {
+  flex-shrink: 0;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.cb-cancel {
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+.cb-cancel:hover {
+  color: var(--err);
+  border-color: color-mix(in oklch, var(--err) 35%, var(--line));
+}
 
 /* dropdown */
 .dd-wrap { position: relative; }

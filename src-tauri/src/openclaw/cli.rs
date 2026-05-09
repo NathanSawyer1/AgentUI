@@ -168,7 +168,7 @@ impl OpenclawAdapter for CliOpenclawAdapter {
         }
 
         self.chat_threads
-            .spawn_chat(session.to_string(), command, on_event);
+            .spawn_chat(session.to_string(), options.message_id, command, on_event);
         Ok(())
     }
 

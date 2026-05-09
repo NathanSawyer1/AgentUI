@@ -348,6 +348,7 @@ pub fn normalize_chat_event(session_id: &str, value: &Value) -> Option<Vec<ChatE
                 session_id: session_id.to_string(),
                 block: tool_block_from_event(data),
                 message_id: read_message_id(value),
+                activity_id: read_activity_id(data).or_else(|| read_activity_id(value)),
             }]),
             "error" => Some(vec![ChatEvent::Error {
                 session_id: session_id.to_string(),
@@ -359,12 +360,105 @@ pub fn normalize_chat_event(session_id: &str, value: &Value) -> Option<Vec<ChatE
                     .to_string(),
                 message_id: read_message_id(value),
             }]),
+            "start" | "message_start" | "turn_start" => Some(vec![ChatEvent::Start {
+                session_id: session_id.to_string(),
+                message_id: read_message_id(value),
+            }]),
+            "done" | "complete" | "message_stop" | "turn_done" => Some(vec![ChatEvent::Done {
+                session_id: session_id.to_string(),
+                message_id: read_message_id(value),
+            }]),
             _ => Some(vec![ChatEvent::Tool {
                 session_id: session_id.to_string(),
                 block: tool_block_from_event(data),
                 message_id: read_message_id(value),
+                activity_id: read_activity_id(data).or_else(|| read_activity_id(value)),
             }]),
         };
+    }
+
+    if let Some(event_name) = value
+        .get("type")
+        .or_else(|| value.get("event"))
+        .or_else(|| value.get("kind"))
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+    {
+        let data = value
+            .get("data")
+            .or_else(|| value.get("payload"))
+            .or_else(|| value.get("delta"))
+            .unwrap_or(value);
+        if matches!(
+            event_name.as_str(),
+            "start" | "message_start" | "assistant_start" | "turn_start"
+        ) {
+            return Some(vec![ChatEvent::Start {
+                session_id: session_id.to_string(),
+                message_id: read_message_id(value),
+            }]);
+        }
+        if matches!(
+            event_name.as_str(),
+            "done" | "complete" | "completed" | "message_stop" | "turn_done" | "turn_complete"
+        ) {
+            return Some(vec![ChatEvent::Done {
+                session_id: session_id.to_string(),
+                message_id: read_message_id(value),
+            }]);
+        }
+        if matches!(event_name.as_str(), "error" | "failed" | "failure") {
+            return Some(vec![ChatEvent::Error {
+                session_id: session_id.to_string(),
+                error: data
+                    .get("error")
+                    .or_else(|| data.get("message"))
+                    .or_else(|| value.get("error"))
+                    .or_else(|| value.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("openclaw agent error")
+                    .to_string(),
+                message_id: read_message_id(value),
+            }]);
+        }
+        if matches!(
+            event_name.as_str(),
+            "token"
+                | "delta"
+                | "text_delta"
+                | "assistant_delta"
+                | "message_delta"
+                | "assistant_token"
+        ) {
+            if let Some(content) = data
+                .get("text")
+                .or_else(|| data.get("content"))
+                .or_else(|| data.get("delta"))
+                .or_else(|| value.get("text"))
+                .or_else(|| value.get("content"))
+                .or_else(|| value.get("token"))
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+            {
+                return Some(vec![ChatEvent::Token {
+                    session_id: session_id.to_string(),
+                    content: content.to_string(),
+                    message_id: read_message_id(value),
+                }]);
+            }
+        }
+        if event_name.contains("tool")
+            || event_name.contains("command")
+            || event_name.contains("activity")
+            || event_name.contains("item")
+        {
+            return Some(vec![ChatEvent::Tool {
+                session_id: session_id.to_string(),
+                block: tool_block_from_event(data),
+                message_id: read_message_id(value),
+                activity_id: read_activity_id(data).or_else(|| read_activity_id(value)),
+            }]);
+        }
     }
 
     if let Some(payloads) = value.get("payloads").and_then(Value::as_array) {
@@ -415,6 +509,7 @@ pub fn normalize_chat_event(session_id: &str, value: &Value) -> Option<Vec<ChatE
             session_id: session_id.to_string(),
             block: tool_block_from_event(value),
             message_id: read_message_id(value),
+            activity_id: read_activity_id(value),
         }]);
     }
 
@@ -445,8 +540,24 @@ pub fn read_message_id(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+pub fn read_activity_id(value: &Value) -> Option<String> {
+    value
+        .get("activity_id")
+        .or_else(|| value.get("activityId"))
+        .or_else(|| value.get("tool_call_id"))
+        .or_else(|| value.get("toolCallId"))
+        .or_else(|| value.get("call_id"))
+        .or_else(|| value.get("callId"))
+        .or_else(|| value.get("id"))
+        .or_else(|| value.get("runId"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+}
+
 pub fn tool_block_from_event(data: &Value) -> ToolBlock {
     let status = activity_status(data);
+    let activity_id = read_activity_id(data);
     let name = data
         .get("name")
         .or_else(|| data.get("tool"))
@@ -504,10 +615,24 @@ pub fn tool_block_from_event(data: &Value) -> ToolBlock {
 
     ToolBlock {
         block_type: "tool".into(),
+        id: activity_id.clone(),
+        activity_id,
         kind,
         title,
         summary,
         status,
+        started_at: data
+            .get("startedAt")
+            .or_else(|| data.get("started_at"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        updated_at: data
+            .get("updatedAt")
+            .or_else(|| data.get("updated_at"))
+            .or_else(|| data.get("completedAt"))
+            .or_else(|| data.get("completed_at"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
         input,
         output,
         error,
@@ -667,6 +792,11 @@ pub fn activity_metadata(data: &Value) -> Option<Value> {
     let mut meta = Map::new();
     for key in [
         "cwd",
+        "id",
+        "activity_id",
+        "activityId",
+        "tool_call_id",
+        "toolCallId",
         "duration",
         "durationMs",
         "elapsedMs",
@@ -681,6 +811,8 @@ pub fn activity_metadata(data: &Value) -> Option<Value> {
         "started_at",
         "completedAt",
         "completed_at",
+        "updatedAt",
+        "updated_at",
         "timestamp",
         "ts",
     ] {
@@ -702,9 +834,17 @@ pub fn compact_value(value: &Value) -> String {
     }
 }
 
-pub fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &super::EventSink) {
+pub fn emit_chat_envelope(
+    session_id: &str,
+    value: &Value,
+    preferred_message_id: Option<String>,
+    on_event: &super::EventSink,
+) {
     use super::ChatEvent;
     let envelope_message_id = read_message_id(value);
+    let message_id = preferred_message_id
+        .clone()
+        .or_else(|| envelope_message_id.clone());
     if let Some(error) = value
         .get("error")
         .or_else(|| value.pointer("/result/error"))
@@ -713,7 +853,7 @@ pub fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &super::Eve
         on_event(ChatEvent::Error {
             session_id: session_id.to_string(),
             error: error.to_string(),
-            message_id: envelope_message_id,
+            message_id,
         });
         return;
     }
@@ -723,7 +863,12 @@ pub fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &super::Eve
     if let Some(events) = normalize_chat_event(session_id, payload_root) {
         for event in events {
             emitted_content = true;
-            let event = with_fallback_message_id(event, envelope_message_id.clone());
+            let event = with_preferred_message_id(
+                event,
+                preferred_message_id
+                    .clone()
+                    .or_else(|| envelope_message_id.clone()),
+            );
             if matches!(event, ChatEvent::Token { .. }) {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -737,11 +882,16 @@ pub fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &super::Eve
         .into_iter()
         .flatten()
     {
+        let block = tool_block_from_event(tool);
+        let activity_id = block.activity_id.clone();
         emitted_content = true;
         on_event(ChatEvent::Tool {
             session_id: session_id.to_string(),
-            block: tool_block_from_event(tool),
-            message_id: envelope_message_id.clone(),
+            block,
+            message_id: preferred_message_id
+                .clone()
+                .or_else(|| envelope_message_id.clone()),
+            activity_id,
         });
     }
 
@@ -749,12 +899,15 @@ pub fn emit_chat_envelope(session_id: &str, value: &Value, on_event: &super::Eve
         on_event(ChatEvent::Error {
             session_id: session_id.to_string(),
             error: "openclaw agent returned no displayable content".into(),
-            message_id: envelope_message_id,
+            message_id,
         });
     }
 }
 
-fn with_fallback_message_id(event: super::ChatEvent, fallback: Option<String>) -> super::ChatEvent {
+fn with_preferred_message_id(
+    event: super::ChatEvent,
+    preferred: Option<String>,
+) -> super::ChatEvent {
     use super::ChatEvent;
     match event {
         ChatEvent::Start {
@@ -762,7 +915,7 @@ fn with_fallback_message_id(event: super::ChatEvent, fallback: Option<String>) -
             message_id,
         } => ChatEvent::Start {
             session_id,
-            message_id: message_id.or(fallback),
+            message_id: preferred.or(message_id),
         },
         ChatEvent::Token {
             session_id,
@@ -771,23 +924,25 @@ fn with_fallback_message_id(event: super::ChatEvent, fallback: Option<String>) -
         } => ChatEvent::Token {
             session_id,
             content,
-            message_id: message_id.or(fallback),
+            message_id: preferred.or(message_id),
         },
         ChatEvent::Tool {
             session_id,
             block,
             message_id,
+            activity_id,
         } => ChatEvent::Tool {
             session_id,
             block,
-            message_id: message_id.or(fallback),
+            message_id: preferred.or(message_id),
+            activity_id,
         },
         ChatEvent::Done {
             session_id,
             message_id,
         } => ChatEvent::Done {
             session_id,
-            message_id: message_id.or(fallback),
+            message_id: preferred.or(message_id),
         },
         ChatEvent::Error {
             session_id,
@@ -796,7 +951,7 @@ fn with_fallback_message_id(event: super::ChatEvent, fallback: Option<String>) -
         } => ChatEvent::Error {
             session_id,
             error,
-            message_id: message_id.or(fallback),
+            message_id: preferred.or(message_id),
         },
     }
 }
@@ -869,6 +1024,7 @@ mod tests {
                     }
                 }
             }),
+            None,
             &sink,
         );
 
@@ -883,5 +1039,77 @@ mod tests {
             super::super::ChatEvent::Tool { block, .. }
                 if block.kind == "terminal" && block.summary == "npm test"
         )));
+    }
+
+    #[test]
+    fn emits_stream_records_with_client_message_and_activity_ids() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let sink: super::super::EventSink = Arc::new(move |event| {
+            captured.lock().unwrap().push(event);
+        });
+
+        emit_chat_envelope(
+            "session-1",
+            &json!({
+                "type": "tool_update",
+                "messageId": "server-msg",
+                "activity_id": "tool-1",
+                "name": "bash",
+                "command": "npm test",
+                "status": "running"
+            }),
+            Some("client-msg".into()),
+            &sink,
+        );
+
+        let events = events.lock().unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            super::super::ChatEvent::Tool { block, message_id, activity_id, .. }
+                if message_id.as_deref() == Some("client-msg")
+                    && activity_id.as_deref() == Some("tool-1")
+                    && block.activity_id.as_deref() == Some("tool-1")
+                    && block.status == "running"
+        )));
+    }
+
+    #[test]
+    fn normalizes_done_stream_record_incrementally() {
+        let events = normalize_chat_event(
+            "session-1",
+            &json!({ "type": "done", "messageId": "server-msg" }),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            &events[0],
+            super::super::ChatEvent::Done { session_id, message_id }
+                if session_id == "session-1" && message_id.as_deref() == Some("server-msg")
+        ));
+    }
+
+    #[test]
+    fn classifies_activity_shapes() {
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "bash", "command": "npm test" })).kind,
+            "terminal"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "kind": "spawn_agent", "agentId": "explorer" })).kind,
+            "subagent"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "read_file", "path": "src/main.rs" })).kind,
+            "file"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "grep", "query": "ChatEvent" })).kind,
+            "search"
+        );
+        assert_eq!(
+            tool_block_from_event(&json!({ "name": "fetch", "url": "https://example.test" })).kind,
+            "network"
+        );
     }
 }

@@ -1,13 +1,46 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MESSAGES } from "../lib/fixtures";
-import { agentsList, chatCancel, listenChat, sessionHistory } from "../lib/openclaw";
+import { agentsList, chatCancel, chatSend, listenChat, sessionHistory } from "../lib/openclaw";
 import { applyChatEvent } from "../lib/chatReducer";
-import { FULL_HISTORY_LIMIT, RECENT_HISTORY_LIMIT, agentIdFromSession, getHistoryCache, isHistoryGenerationCurrent, mapHistoryMessages, mergeHistoryMessages, nextHistoryGeneration, preservedScrollTop, setHistoryCache, updateHistoryCache, type HistoryLoadStatus } from "../lib/chatHistory";
+import { FULL_HISTORY_LIMIT, RECENT_HISTORY_LIMIT, agentIdFromSession, getHistoryCache, isHistoryGenerationCurrent, mapHistoryMessages, mergeHistoryMessages, nextHistoryGeneration, nowTime, preservedScrollTop, setHistoryCache, updateHistoryCache, type HistoryLoadStatus } from "../lib/chatHistory";
 import { durationLabel, exitCodeLabel, formatActivityValue, objectValue, stringValue, subagentName, terminalCommand, toolIconFor, toolStatusClass, toolStatusIcon, toolStatusLabel } from "../lib/chatTools";
-import type { ChatEvent, ChatMessage, ToolBlock } from "../lib/types";
+import type { ChatEvent, ChatMessage, ChatSendOptions, ChatTurnState, ToolBlock } from "../lib/types";
 import { Composer } from "./Composer";
 import { Icon } from "./Icons";
 import { RefreshButton, RefreshError, RefreshMeta } from "./RefreshStatus";
+
+interface PendingTurn {
+  sessionId: string;
+  userId: string;
+  messageId: string;
+  text: string;
+  options: ChatSendOptions;
+}
+
+let turnSeq = 0;
+
+function nextTurnId(sessionId: string): string {
+  turnSeq += 1;
+  return `turn-${Date.now().toString(36)}-${turnSeq.toString(36)}-${sessionId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function optimisticUserMessage(turn: PendingTurn): ChatMessage {
+  return { id: turn.userId, kind: "user", time: nowTime(), text: turn.text };
+}
+
+function optimisticAssistantMessage(turn: PendingTurn): ChatMessage {
+  return {
+    id: turn.messageId,
+    kind: "agent",
+    time: nowTime(),
+    turnState: "sending",
+    blocks: [{ type: "thinking", status: "sending", label: "sending" }],
+  };
+}
+
+function turnEventKey(sessionId: string, messageId: string): string {
+  return `${sessionId}:${messageId}`;
+}
 
 // ---------------------------------------------------------------------------
 // Tool card
@@ -158,10 +191,11 @@ function ActivitySection({ title, value, tone, scroll = false }: { title: string
 // Thinking indicator
 // ---------------------------------------------------------------------------
 
-function Thinking() {
+function Thinking({ status, label }: { status?: ChatTurnState; label?: string }) {
+  const text = label || status || "thinking";
   return (
     <div className="thinking">
-      thinking
+      {text}
       <span className="thinking-dots"><span></span><span></span><span></span></span>
     </div>
   );
@@ -202,8 +236,8 @@ const Message = memo(function Message({ msg }: { msg: ChatMessage }) {
       <div className="content">
         {msg.blocks.map((b, i) => {
           if (b.type === "text") return <p key={i}>{renderInline(b.content)}</p>;
-          if (b.type === "tool") return <ToolCard key={i} block={b} />;
-          return <Thinking key={i} />;
+          if (b.type === "tool") return <ToolCard key={b.activity_id ?? b.id ?? i} block={b} />;
+          return <Thinking key={i} status={b.status} label={b.label} />;
         })}
       </div>
     </div>
@@ -243,10 +277,15 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
   const [historyStale, setHistoryStale] = useState(false);
   const [historyUpdatedAt, setHistoryUpdatedAt] = useState<number | undefined>(undefined);
   const [refreshRequest, setRefreshRequest] = useState({ sessionId: "", nonce: 0 });
+  const [turnState, setTurnState] = useState<ChatTurnState | null>(null);
+  const [queuedCount, setQueuedCount] = useState(0);
 
   const prevSessionRef = useRef<string | null>(null);
   const activeSessionRef = useRef(sessionId);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const activeTurnRef = useRef<PendingTurn | null>(null);
+  const queuedTurnsRef = useRef<PendingTurn[]>([]);
+  const ignoredTurnEventKeysRef = useRef<Set<string>>(new Set());
   const scrollModeRef = useRef<"bottom" | "preserve" | "stick" | "none">("bottom");
   const scrollSnapshotRef = useRef<{ height: number; top: number } | null>(null);
 
@@ -274,12 +313,105 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
     scrollModeRef.current = isNearBottom() ? "stick" : "none";
   }, [isNearBottom]);
 
+  const replaceMessagesForSession = useCallback((targetSession: string, updater: (current: ChatMessage[]) => ChatMessage[]) => {
+    if (activeSessionRef.current === targetSession) {
+      setMessages((current) => {
+        const next = updater(current);
+        const cached = getHistoryCache(targetSession);
+        if (cached) setHistoryCache(targetSession, { ...cached, messages: next });
+        else setHistoryCache(targetSession, { messages: next, status: "ready", generation: nextHistoryGeneration(targetSession), updatedAt: Date.now() });
+        return next;
+      });
+      return;
+    }
+
+    const cached = getHistoryCache(targetSession);
+    const next = updater(cached?.messages ?? []);
+    if (cached) setHistoryCache(targetSession, { ...cached, messages: next });
+    else setHistoryCache(targetSession, { messages: next, status: "ready", generation: nextHistoryGeneration(targetSession), updatedAt: Date.now() });
+  }, []);
+
+  const applyEventsForSession = useCallback((targetSession: string, events: ChatEvent[], stick = true) => {
+    if (activeSessionRef.current === targetSession && stick) markScrollStickIfNeeded();
+    replaceMessagesForSession(targetSession, (current) => events.reduce((messages, event) => applyChatEvent(messages, targetSession, event), current));
+  }, [markScrollStickIfNeeded, replaceMessagesForSession]);
+
+  const markTurnCanceling = useCallback((turn: PendingTurn) => {
+    replaceMessagesForSession(turn.sessionId, (current) => current.map((message) => {
+      if (message.kind !== "agent" || message.id !== turn.messageId) return message;
+      const hasThinking = message.blocks.some((block) => block.type === "thinking");
+      const blocks = hasThinking
+        ? message.blocks.map((block) => block.type === "thinking" ? { type: "thinking" as const, status: "canceling" as const, label: "canceling" } : block)
+        : [...message.blocks, { type: "thinking" as const, status: "canceling" as const, label: "canceling" }];
+      return { ...message, turnState: "canceling" as const, blocks };
+    }));
+  }, [replaceMessagesForSession]);
+
+  const startTurn = useCallback((turn: PendingTurn) => {
+    activeTurnRef.current = turn;
+    setTurnState("sending");
+    markScrollBottom();
+    replaceMessagesForSession(turn.sessionId, (current) => [...current, optimisticAssistantMessage(turn)]);
+
+    void chatSend(turn.sessionId, turn.text, { ...turn.options, messageId: turn.messageId }).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      const doneEvent: ChatEvent = { type: "done", session_id: turn.sessionId, message_id: turn.messageId };
+      applyEventsForSession(turn.sessionId, [
+        { type: "error", session_id: turn.sessionId, message_id: turn.messageId, error: message },
+        doneEvent,
+      ]);
+      if (activeTurnRef.current?.messageId === turn.messageId) {
+        activeTurnRef.current = null;
+        const next = queuedTurnsRef.current.shift();
+        setQueuedCount(queuedTurnsRef.current.length);
+        if (next && activeSessionRef.current === next.sessionId) startTurn(next);
+        else setTurnState(null);
+      }
+      onError(message);
+    });
+  }, [applyEventsForSession, markScrollBottom, onError, replaceMessagesForSession]);
+
+  const completeActiveTurn = useCallback((event: ChatEvent) => {
+    if (event.type !== "done") return;
+    const active = activeTurnRef.current;
+    if (!active || event.session_id !== active.sessionId) return;
+    if (event.message_id && event.message_id !== active.messageId) return;
+
+    activeTurnRef.current = null;
+    const next = queuedTurnsRef.current.shift();
+    setQueuedCount(queuedTurnsRef.current.length);
+    if (next && activeSessionRef.current === next.sessionId) {
+      startTurn(next);
+    } else {
+      setTurnState(null);
+    }
+  }, [startTurn]);
+
   useEffect(() => {
     activeSessionRef.current = sessionId;
     const prev = prevSessionRef.current;
     prevSessionRef.current = sessionId;
     if (prev && prev !== sessionId) {
       void chatCancel(prev).catch(() => undefined);
+      const active = activeTurnRef.current;
+      if (active?.sessionId === prev) {
+        ignoredTurnEventKeysRef.current.add(turnEventKey(active.sessionId, active.messageId));
+        applyEventsForSession(prev, [
+          { type: "error", session_id: prev, message_id: active.messageId, error: "Turn interrupted because the session was switched." },
+          { type: "done", session_id: prev, message_id: active.messageId },
+        ], false);
+      }
+      for (const turn of queuedTurnsRef.current.filter((queued) => queued.sessionId === prev)) {
+        ignoredTurnEventKeysRef.current.add(turnEventKey(turn.sessionId, turn.messageId));
+        applyEventsForSession(prev, [
+          { type: "error", session_id: prev, message_id: turn.messageId, error: "Queued message was not sent because the session was switched." },
+          { type: "done", session_id: prev, message_id: turn.messageId },
+        ], false);
+      }
+      activeTurnRef.current = null;
+      queuedTurnsRef.current = [];
+      setQueuedCount(0);
+      setTurnState(null);
     }
     setHistoryError("");
     setHistoryStale(false);
@@ -319,9 +451,12 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
         const recent = mapHistoryMessages(history);
         if (forceRefresh) markScrollPreserve();
         else markScrollBottom();
-        setMessages(recent);
+        setMessages((current) => {
+          const merged = mergeHistoryMessages(current, recent);
+          setHistoryCache(sessionId, { messages: merged, status: "hydrating", generation, updatedAt: cached?.updatedAt });
+          return merged;
+        });
         setHistoryStatus("hydrating");
-        setHistoryCache(sessionId, { messages: recent, status: "hydrating", generation, updatedAt: cached?.updatedAt });
 
         void sessionHistory(sessionId, FULL_HISTORY_LIMIT)
           .then((fullHistory) => {
@@ -358,17 +493,21 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
         onError(message);
       });
     return () => { cancelled = true; };
-  }, [sessionId, useMock, refreshRequest, onError, markScrollBottom, markScrollPreserve]);
+  }, [sessionId, useMock, refreshRequest, onError, markScrollBottom, markScrollPreserve, applyEventsForSession]);
 
   const applyEvent = useCallback((event: ChatEvent) => {
-    markScrollStickIfNeeded();
-    setMessages((current) => {
-      const next = applyChatEvent(current, sessionId, event);
-      const cached = getHistoryCache(sessionId);
-      if (cached) setHistoryCache(sessionId, { ...cached, messages: next });
-      return next;
-    });
-  }, [sessionId, markScrollStickIfNeeded]);
+    if (event.session_id !== sessionId) return;
+    if (event.message_id && ignoredTurnEventKeysRef.current.has(turnEventKey(event.session_id, event.message_id))) return;
+    applyEventsForSession(sessionId, [event]);
+
+    const active = activeTurnRef.current;
+    const activeEvent = active && event.session_id === active.sessionId && (!event.message_id || event.message_id === active.messageId);
+    if (!activeEvent) return;
+
+    if (event.type === "start" || event.type === "token" || event.type === "tool") setTurnState("working");
+    if (event.type === "error") setTurnState("failed");
+    if (event.type === "done") completeActiveTurn(event);
+  }, [applyEventsForSession, completeActiveTurn, sessionId]);
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
@@ -392,14 +531,44 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
     scrollSnapshotRef.current = null;
   }, [messages]);
 
-  const handleUserMessage = (text: string) => {
+  const handleSubmit = (text: string, options: ChatSendOptions) => {
+    const messageId = nextTurnId(sessionId);
+    const turn: PendingTurn = {
+      sessionId,
+      userId: `${messageId}-user`,
+      messageId,
+      text,
+      options,
+    };
+
     markScrollBottom();
-    setMessages((current) => {
-      const next: ChatMessage[] = [...current, { kind: "user", time: new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date()), text }];
-      const cached = getHistoryCache(sessionId);
-      if (cached) setHistoryCache(sessionId, { ...cached, messages: next });
-      return next;
-    });
+    replaceMessagesForSession(sessionId, (current) => [...current, optimisticUserMessage(turn)]);
+
+    if (activeTurnRef.current) {
+      queuedTurnsRef.current = [...queuedTurnsRef.current, turn];
+      setQueuedCount(queuedTurnsRef.current.length);
+      return;
+    }
+
+    startTurn(turn);
+  };
+
+  const cancelActiveTurn = () => {
+    const turn = activeTurnRef.current;
+    if (!turn) return;
+    setTurnState("canceling");
+    markTurnCanceling(turn);
+    ignoredTurnEventKeysRef.current.add(turnEventKey(turn.sessionId, turn.messageId));
+    void chatCancel(turn.sessionId)
+      .catch((error) => onError(error instanceof Error ? error.message : String(error)))
+      .finally(() => {
+        const doneEvent: ChatEvent = { type: "done", session_id: turn.sessionId, message_id: turn.messageId };
+        applyEventsForSession(turn.sessionId, [
+          { type: "error", session_id: turn.sessionId, message_id: turn.messageId, error: "Turn canceled." },
+          doneEvent,
+        ]);
+        completeActiveTurn(doneEvent);
+      });
   };
 
   const refreshHistory = () => {
@@ -426,7 +595,14 @@ export function Chat({ sessionId, useMock, onError }: { sessionId: string; useMo
           {messages.map((m, i) => <Message key={m.id ?? i} msg={m} />)}
         </div>
       </div>
-      <Composer sessionId={sessionId} onUserMessage={handleUserMessage} onChatEvents={(events) => events.forEach(applyEvent)} onError={onError} />
+      <Composer
+        sessionId={sessionId}
+        turnState={turnState}
+        queuedCount={queuedCount}
+        onSubmit={handleSubmit}
+        onCancel={cancelActiveTurn}
+        onError={onError}
+      />
     </>
   );
 }

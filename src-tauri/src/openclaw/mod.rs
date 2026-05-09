@@ -37,10 +37,18 @@ pub struct PreviewLine {
 pub struct ToolBlock {
     #[serde(rename = "type")]
     pub block_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_id: Option<String>,
     pub kind: String,
     pub title: String,
     pub summary: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,6 +86,7 @@ pub enum ChatEvent {
         session_id: String,
         block: ToolBlock,
         message_id: Option<String>,
+        activity_id: Option<String>,
     },
     #[serde(rename = "done")]
     Done {
@@ -96,6 +105,8 @@ pub enum ChatEvent {
 pub struct ChatSendOptions {
     #[serde(rename = "agentId")]
     pub agent_id: Option<String>,
+    #[serde(rename = "messageId")]
+    pub message_id: Option<String>,
     pub model: Option<String>,
     pub thinking: Option<String>,
     pub permission: Option<String>,

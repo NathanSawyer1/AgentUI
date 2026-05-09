@@ -30,6 +30,7 @@ npm run tauri:build
 - [Linux release checklist](./docs/RELEASE_LINUX.md)
 - [Troubleshooting](./docs/TROUBLESHOOTING.md)
 - [Manual smoke checklist](./docs/SMOKE_CHECKLIST.md)
+- [OpenClaw chat PR notes](./docs/OPENCLAW_CHAT_PR_NOTES.md)
 
 ## Env vars
 

@@ -68,15 +68,16 @@ impl OpenclawAdapter for MockOpenclawAdapter {
         &self,
         session: &str,
         text: &str,
-        _options: ChatSendOptions,
+        options: ChatSendOptions,
         on_event: EventSink,
     ) -> Result<()> {
         let session_id = session.to_string();
         let prompt = text.to_string();
+        let message_id = options.message_id;
         thread::spawn(move || {
             on_event(ChatEvent::Start {
                 session_id: session_id.clone(),
-                message_id: None,
+                message_id: message_id.clone(),
             });
             let answer = format!("Mock openclaw received `{}`. Streaming is wired through Tauri events, so the real CLI can now replace this adapter.", prompt);
             for chunk in answer.split_inclusive(' ') {
@@ -84,18 +85,23 @@ impl OpenclawAdapter for MockOpenclawAdapter {
                 on_event(ChatEvent::Token {
                     session_id: session_id.clone(),
                     content: chunk.to_string(),
-                    message_id: None,
+                    message_id: message_id.clone(),
                 });
             }
             on_event(ChatEvent::Tool {
                 session_id: session_id.clone(),
-                message_id: None,
+                message_id: message_id.clone(),
+                activity_id: Some("mock-terminal-build".into()),
                 block: ToolBlock {
                     block_type: "tool".into(),
+                    id: Some("mock-terminal-build".into()),
+                    activity_id: Some("mock-terminal-build".into()),
                     kind: "terminal".into(),
                     title: "Terminal".into(),
                     summary: "npm run build".into(),
                     status: "ok".into(),
+                    started_at: None,
+                    updated_at: None,
                     input: Some(json!({ "command": "npm run build" })),
                     output: Some(json!(
                         "vite v6.3.5 building...\n✓ 42 modules transformed\n✓ built in 812ms"
@@ -115,13 +121,18 @@ impl OpenclawAdapter for MockOpenclawAdapter {
             });
             on_event(ChatEvent::Tool {
                 session_id: session_id.clone(),
-                message_id: None,
+                message_id: message_id.clone(),
+                activity_id: Some("mock-read-settings".into()),
                 block: ToolBlock {
                     block_type: "tool".into(),
+                    id: Some("mock-read-settings".into()),
+                    activity_id: Some("mock-read-settings".into()),
                     kind: "tool".into(),
                     title: "Tool".into(),
                     summary: "Read workspace settings".into(),
                     status: "ok".into(),
+                    started_at: None,
+                    updated_at: None,
                     input: Some(json!({ "path": "src/settings.rs" })),
                     output: Some(json!(
                         "Loaded SettingsStore and OpenClaw adapter configuration."
@@ -138,13 +149,18 @@ impl OpenclawAdapter for MockOpenclawAdapter {
             });
             on_event(ChatEvent::Tool {
                 session_id: session_id.clone(),
-                message_id: None,
+                message_id: message_id.clone(),
+                activity_id: Some("mock-subagent-explorer".into()),
                 block: ToolBlock {
                     block_type: "tool".into(),
+                    id: Some("mock-subagent-explorer".into()),
+                    activity_id: Some("mock-subagent-explorer".into()),
                     kind: "subagent".into(),
                     title: "Subagent".into(),
                     summary: "Spawned explorer for event normalization".into(),
                     status: "running".into(),
+                    started_at: Some("2026-04-25T23:45:00Z".into()),
+                    updated_at: None,
                     input: Some(
                         json!({ "agent": "explorer", "task": "Inspect OpenClaw event payload examples" }),
                     ),
@@ -163,13 +179,18 @@ impl OpenclawAdapter for MockOpenclawAdapter {
             });
             on_event(ChatEvent::Tool {
                 session_id: session_id.clone(),
-                message_id: None,
+                message_id: message_id.clone(),
+                activity_id: Some("mock-terminal-check".into()),
                 block: ToolBlock {
                     block_type: "tool".into(),
+                    id: Some("mock-terminal-check".into()),
+                    activity_id: Some("mock-terminal-check".into()),
                     kind: "terminal".into(),
                     title: "Terminal".into(),
                     summary: "cargo check --manifest-path src-tauri/Cargo.toml".into(),
                     status: "err".into(),
+                    started_at: None,
+                    updated_at: None,
                     input: Some(
                         json!({ "command": "cargo check --manifest-path src-tauri/Cargo.toml" }),
                     ),
@@ -190,7 +211,7 @@ impl OpenclawAdapter for MockOpenclawAdapter {
             });
             on_event(ChatEvent::Done {
                 session_id,
-                message_id: None,
+                message_id,
             });
         });
         Ok(())

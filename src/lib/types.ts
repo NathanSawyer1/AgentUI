@@ -111,6 +111,7 @@ export interface ChatSendOptions {
   model?: string;
   thinking?: "off" | "minimal" | "low" | "medium" | "high";
   permission?: string;
+  messageId?: string;
 }
 
 export interface PreviewLine {
@@ -124,10 +125,14 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 
 export interface ToolBlock {
   type: "tool";
+  id?: string;
+  activity_id?: string;
   kind?: ActivityKind;
   title?: string;
   summary?: string;
   status: ActivityStatus;
+  started_at?: string;
+  updated_at?: string;
   input?: JsonValue;
   output?: JsonValue;
   error?: JsonValue;
@@ -145,9 +150,12 @@ export interface TextBlock {
 
 export interface ThinkingBlock {
   type: "thinking";
+  status?: ChatTurnState;
+  label?: string;
 }
 
 export type MessageBlock = TextBlock | ToolBlock | ThinkingBlock;
+export type ChatTurnState = "sending" | "working" | "canceling" | "failed" | "complete";
 
 export interface UserMessage {
   id?: string;
@@ -162,6 +170,7 @@ export interface AgentMessage {
   historyKey?: string;
   kind: "agent";
   time: string;
+  turnState?: ChatTurnState;
   blocks: MessageBlock[];
 }
 
@@ -302,7 +311,7 @@ export interface WorkspaceStatus {
 export type ChatEvent =
   | { session_id: string; type: "start"; message_id?: string }
   | { session_id: string; type: "token"; content: string; message_id?: string }
-  | { session_id: string; type: "tool"; block: ToolBlock; message_id?: string }
+  | { session_id: string; type: "tool"; block: ToolBlock; message_id?: string; activity_id?: string }
   | { session_id: string; type: "done"; message_id?: string }
   | { session_id: string; type: "error"; error: string; message_id?: string };
 

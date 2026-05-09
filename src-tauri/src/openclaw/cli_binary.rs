@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    io::{BufReader, Read},
+    io::{BufRead, BufReader, Read},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -21,21 +21,36 @@ impl ChatThreads {
         }
     }
 
-    pub fn spawn_chat(&self, session_id: String, mut command: Command, on_event: EventSink) {
+    pub fn spawn_chat(
+        &self,
+        session_id: String,
+        message_id: Option<String>,
+        mut command: Command,
+        on_event: EventSink,
+    ) {
         let children = Arc::clone(&self.children);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        on_event(ChatEvent::Start {
+            session_id: session_id.clone(),
+            message_id: message_id.clone(),
+        });
+
         thread::spawn(move || {
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(error) => {
                     on_event(ChatEvent::Error {
-                        session_id,
+                        session_id: session_id.clone(),
                         error: error.to_string(),
-                        message_id: None,
+                        message_id: message_id.clone(),
+                    });
+                    on_event(ChatEvent::Done {
+                        session_id,
+                        message_id,
                     });
                     return;
                 }
@@ -43,14 +58,24 @@ impl ChatThreads {
 
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
-            children
-                .lock()
-                .expect("children mutex poisoned")
-                .insert(session_id.clone(), child);
-            on_event(ChatEvent::Start {
-                session_id: session_id.clone(),
-                message_id: None,
-            });
+            {
+                let mut guard = children.lock().expect("children mutex poisoned");
+                if guard.contains_key(&session_id) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    on_event(ChatEvent::Error {
+                        session_id: session_id.clone(),
+                        error: "OpenClaw is already working on this session.".into(),
+                        message_id: message_id.clone(),
+                    });
+                    on_event(ChatEvent::Done {
+                        session_id,
+                        message_id,
+                    });
+                    return;
+                }
+                guard.insert(session_id.clone(), child);
+            }
 
             let stderr_text = Arc::new(Mutex::new(String::new()));
             let stderr_capture = Arc::clone(&stderr_text);
@@ -63,9 +88,41 @@ impl ChatThreads {
             });
 
             let mut stdout_text = String::new();
+            let mut parsed_records = 0usize;
+            let mut malformed_records = Vec::new();
             if let Some(stdout) = stdout {
                 let mut reader = BufReader::new(stdout);
-                let _ = reader.read_to_string(&mut stdout_text);
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) => break,
+                        Ok(_) => {
+                            stdout_text.push_str(&line);
+                            let trimmed = line.trim();
+                            if trimmed.is_empty() {
+                                continue;
+                            }
+                            match serde_json::from_str::<Value>(trimmed) {
+                                Ok(value) => {
+                                    parsed_records += 1;
+                                    super::cli_normalize::emit_chat_envelope(
+                                        &session_id,
+                                        &value,
+                                        message_id.clone(),
+                                        &on_event,
+                                    );
+                                }
+                                Err(error) => {
+                                    malformed_records.push(format!("{error}: {trimmed}"));
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            malformed_records.push(error.to_string());
+                            break;
+                        }
+                    }
+                }
             }
 
             let exit_ok = if let Some(mut child) = children
@@ -100,17 +157,41 @@ impl ChatThreads {
                 on_event(ChatEvent::Error {
                     session_id: session_id.clone(),
                     error,
-                    message_id: None,
+                    message_id: message_id.clone(),
                 });
+            } else if parsed_records > 0 {
+                for error in malformed_records {
+                    on_event(ChatEvent::Error {
+                        session_id: session_id.clone(),
+                        error: format!("failed to parse openclaw stream JSON line: {error}"),
+                        message_id: message_id.clone(),
+                    });
+                }
+                if !exit_ok {
+                    let stderr = stderr_text
+                        .lock()
+                        .expect("stderr mutex poisoned")
+                        .trim()
+                        .to_string();
+                    if !stderr.is_empty() {
+                        on_event(ChatEvent::Error {
+                            session_id: session_id.clone(),
+                            error: stderr,
+                            message_id: message_id.clone(),
+                        });
+                    }
+                }
             } else {
                 match serde_json::from_str::<Value>(&stdout_text)
                     .context("failed to parse openclaw agent JSON envelope")
                 {
-                    Ok(value) => emit_chat_envelope(&session_id, &value, &on_event),
+                    Ok(value) => {
+                        emit_chat_envelope(&session_id, &value, message_id.clone(), &on_event)
+                    }
                     Err(error) => on_event(ChatEvent::Error {
                         session_id: session_id.clone(),
                         error: error.to_string(),
-                        message_id: None,
+                        message_id: message_id.clone(),
                     }),
                 }
                 if !exit_ok {
@@ -123,14 +204,14 @@ impl ChatThreads {
                         on_event(ChatEvent::Error {
                             session_id: session_id.clone(),
                             error: stderr,
-                            message_id: None,
+                            message_id: message_id.clone(),
                         });
                     }
                 }
             }
             on_event(ChatEvent::Done {
                 session_id,
-                message_id: None,
+                message_id,
             });
         });
     }
@@ -142,6 +223,7 @@ impl ChatThreads {
             .remove(session_id)
             .map(|mut c| {
                 let _ = c.kill();
+                let _ = c.wait();
                 ()
             })
     }

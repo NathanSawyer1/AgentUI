@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { agentCapabilities, agentsList, chatSend, modelsList, skillsList, slashCommandsList } from "../lib/openclaw";
+import { agentCapabilities, agentsList, modelsList, skillsList, slashCommandsList } from "../lib/openclaw";
 import { CATEGORY_ORDER, categoryLabel, filterSlashCommands, nextArgIndex, shouldKeepArgPicker, slashFilterMatch, commandAlias } from "../lib/slashCommands";
 import { PERMISSION_MODES, DEFAULT_MODELS, DEFAULT_AGENTS, THINKING_LEVELS } from "../lib/composerOptions";
-import { applyChatEvent } from "../lib/chatReducer";
-import { nowTime } from "../lib/chatHistory";
 import { getResourceCache, nextResourceGeneration, payloadEqual, setResourceCache, updateResourceCache } from "../lib/memoryCache";
 import { buildSuggestions } from "../lib/suggestions";
-import type { AgentCapabilities, ChatEvent, ChatSendOptions, OptionItem, SkillItem, SlashCommand } from "../lib/types";
+import type { AgentCapabilities, ChatSendOptions, ChatTurnState, OptionItem, SkillItem, SlashCommand } from "../lib/types";
 import { Icon } from "./Icons";
 
 const CAPABILITIES_CACHE_KEY = "composer:agentCapabilities";
@@ -180,7 +178,21 @@ function resizeTextarea(el: HTMLTextAreaElement) {
 // Composer
 // ---------------------------------------------------------------------------
 
-export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { sessionId: string; onUserMessage: (text: string) => void; onChatEvents: (events: ChatEvent[]) => void; onError: (message: string) => void }) {
+export function Composer({
+  sessionId,
+  turnState,
+  queuedCount,
+  onSubmit,
+  onCancel,
+  onError,
+}: {
+  sessionId: string;
+  turnState: ChatTurnState | null;
+  queuedCount: number;
+  onSubmit: (text: string, options: ChatSendOptions) => void;
+  onCancel: () => void;
+  onError: (message: string) => void;
+}) {
   const [text, setText] = useState("");
   const [models, setModels] = useState<OptionItem[]>(DEFAULT_MODELS);
   const [agents, setAgents] = useState<OptionItem[]>(DEFAULT_AGENTS);
@@ -207,6 +219,15 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
   const modelDdRef = useRef<HTMLDivElement | null>(null);
   const thinkingDdRef = useRef<HTMLDivElement | null>(null);
   const permDdRef = useRef<HTMLDivElement | null>(null);
+
+  const refocus = () => {
+    window.requestAnimationFrame(() => textRef.current?.focus());
+  };
+
+  const closeDropdown = () => {
+    setOpenDd(null);
+    refocus();
+  };
 
   const applyCachedMetadata = () => {
     const cachedCapabilities = getResourceCache<AgentCapabilities>(CAPABILITIES_CACHE_KEY)?.data;
@@ -247,6 +268,7 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
   useEffect(() => {
     setSlashOpen(false);
     setArgPicker(null);
+    refocus();
   }, [sessionId]);
 
   useEffect(() => {
@@ -271,7 +293,7 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (refs[openDd].current?.contains(target)) return;
-      setOpenDd(null);
+      closeDropdown();
     };
     document.addEventListener("mousedown", closeWhenOutside);
     return () => document.removeEventListener("mousedown", closeWhenOutside);
@@ -323,7 +345,7 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
 
   const slashMatches = useMemo(() => filterSlashCommands(commands, slashFilter), [commands, slashFilter]);
 
-  const handleSend = async () => {
+  const handleSend = () => {
     const outgoing = text.trim();
     if (!outgoing) return;
     setText("");
@@ -331,14 +353,8 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
     setSlashOpen(false);
     setArgPicker(null);
     if (textRef.current) textRef.current.style.height = "auto";
-    onUserMessage(outgoing);
-    try {
-      await chatSend(sessionId, outgoing, { agentId, model: model || undefined, thinking });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      onChatEvents([{ type: "error", session_id: sessionId, error: message }, { type: "done", session_id: sessionId }]);
-      onError(message);
-    }
+    onSubmit(outgoing, { agentId, model: model || undefined, thinking, permission });
+    refocus();
   };
 
   const selectCommand = (cmd: SlashCommand) => {
@@ -353,7 +369,7 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
     } else {
       setArgPicker(null);
     }
-    textRef.current?.focus();
+    refocus();
   };
 
   const applyArgChoice = (cmd: SlashCommand, argIndex: number, highlightIdx: number) => {
@@ -366,7 +382,7 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
     } else {
       setArgPicker(null);
     }
-    textRef.current?.focus();
+    refocus();
   };
 
   const updateText = (next: string) => {
@@ -418,7 +434,7 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
         {suggestions.length > 0 && !text && (
           <div className="suggestions">
             {suggestions.map((suggestion) => (
-              <button key={`${suggestion.source}:${suggestion.label}`} className="suggestion" onClick={() => { updateText(suggestion.insert); textRef.current?.focus(); }}>
+              <button key={`${suggestion.source}:${suggestion.label}`} className="suggestion" onClick={() => { updateText(suggestion.insert); refocus(); }}>
                 {suggestion.label}
               </button>
             ))}
@@ -493,17 +509,18 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
               const files = Array.from(e.target.files ?? []).map((f) => ({ name: f.name, size: f.size }));
               setAttached((a) => [...a, ...files]);
               e.currentTarget.value = "";
+              refocus();
             }} />
             <button className="cb-btn plus" title="Attach files" onClick={() => fileRef.current?.click()}><Icon name="plus" size={14} /></button>
             <div className="cb-spacer"></div>
             <div className="dd-wrap" ref={permDdRef}>
-              <button className={"cb-btn mode-" + permission} title="Permission mode" onClick={() => setOpenDd(openDd === "permission" ? null : "permission")}><Icon name="layers" size={11} />{permItem.name}<Icon name="chevDown" size={10} /></button>
-              <Dropdown open={openDd === "permission"} onClose={() => setOpenDd(null)} align="left">
+              <button className={"cb-btn mode-" + permission} title="Permission mode" onClick={() => openDd === "permission" ? closeDropdown() : setOpenDd("permission")}><Icon name="layers" size={11} />{permItem.name}<Icon name="chevDown" size={10} /></button>
+              <Dropdown open={openDd === "permission"} onClose={closeDropdown} align="left">
                 <div className="dd-head">Mode</div>
                 {PERMISSION_MODES.map((it) => {
                   const unavailable = it.id !== "default" && !capabilities.permissionFlags;
                   return (
-                    <div key={it.id} className={"dd-item" + (permission === it.id ? " active" : "") + (unavailable ? " disabled" : "")} onClick={() => { if (!unavailable) { setPermission(it.id as "default" | "plan" | "yolo"); setOpenDd(null); } }}>
+                    <div key={it.id} className={"dd-item" + (permission === it.id ? " active" : "") + (unavailable ? " disabled" : "")} onClick={() => { if (!unavailable) { setPermission(it.id as "default" | "plan" | "yolo"); closeDropdown(); } }}>
                       <span className="check">{permission === it.id ? <Icon name="check" size={10} /> : null}</span>
                       <div className="text">
                         <div>{it.name}</div>
@@ -516,24 +533,31 @@ export function Composer({ sessionId, onUserMessage, onChatEvents, onError }: { 
               </Dropdown>
             </div>
             <div className="dd-wrap" ref={agentDdRef}>
-              <button className="cb-btn" onClick={() => { loadAgents(); setOpenDd(openDd === "agent" ? null : "agent"); }}><Icon name="tool" size={11} />{agentItem.name}<Icon name="chevDown" size={10} /></button>
-              <Dropdown open={openDd === "agent"} onClose={() => setOpenDd(null)} align="right">
-                <OptionMenu title="Agent" items={agents} value={agentId} onChange={setAgentId} onClose={() => setOpenDd(null)} />
+              <button className="cb-btn" onClick={() => { loadAgents(); openDd === "agent" ? closeDropdown() : setOpenDd("agent"); }}><Icon name="tool" size={11} />{agentItem.name}<Icon name="chevDown" size={10} /></button>
+              <Dropdown open={openDd === "agent"} onClose={closeDropdown} align="right">
+                <OptionMenu title="Agent" items={agents} value={agentId} onChange={setAgentId} onClose={closeDropdown} />
               </Dropdown>
             </div>
             <div className="dd-wrap" ref={modelDdRef}>
-              <button className="cb-btn" onClick={() => { loadModels(); setOpenDd(openDd === "model" ? null : "model"); }}><Icon name="cpu" size={11} />{modelItem.name}<Icon name="chevDown" size={10} /></button>
-              <Dropdown open={openDd === "model"} onClose={() => setOpenDd(null)} align="right">
-                <OptionMenu title="Model" items={models} value={model} onChange={setModel} onClose={() => setOpenDd(null)} />
+              <button className="cb-btn" onClick={() => { loadModels(); openDd === "model" ? closeDropdown() : setOpenDd("model"); }}><Icon name="cpu" size={11} />{modelItem.name}<Icon name="chevDown" size={10} /></button>
+              <Dropdown open={openDd === "model"} onClose={closeDropdown} align="right">
+                <OptionMenu title="Model" items={models} value={model} onChange={setModel} onClose={closeDropdown} />
               </Dropdown>
             </div>
             <div className="dd-wrap" ref={thinkingDdRef}>
-              <button className={"cb-btn" + (thinking !== "off" ? " active" : "")} title="Thinking level" onClick={() => setOpenDd(openDd === "thinking" ? null : "thinking")}><Icon name="eye" size={11} />{thinkingItem.name}<Icon name="chevDown" size={10} /></button>
-              <Dropdown open={openDd === "thinking"} onClose={() => setOpenDd(null)} align="right">
-                <OptionMenu title="Thinking" items={THINKING_LEVELS} value={thinking ?? "off"} onChange={(id) => setThinking(id as ChatSendOptions["thinking"])} onClose={() => setOpenDd(null)} />
+              <button className={"cb-btn" + (thinking !== "off" ? " active" : "")} title="Thinking level" onClick={() => openDd === "thinking" ? closeDropdown() : setOpenDd("thinking")}><Icon name="eye" size={11} />{thinkingItem.name}<Icon name="chevDown" size={10} /></button>
+              <Dropdown open={openDd === "thinking"} onClose={closeDropdown} align="right">
+                <OptionMenu title="Thinking" items={THINKING_LEVELS} value={thinking ?? "off"} onChange={(id) => setThinking(id as ChatSendOptions["thinking"])} onClose={closeDropdown} />
               </Dropdown>
             </div>
-            <button className="cb-send" disabled={!text.trim()} onClick={() => void handleSend()}><Icon name="arrowUp" size={14} stroke={2} /></button>
+            {queuedCount > 0 ? <span className="composer-state">{queuedCount} queued</span> : null}
+            {turnState && turnState !== "complete" && turnState !== "failed" ? (
+              <button className="cb-btn cb-cancel" type="button" title="Cancel active turn" onClick={onCancel}>
+                <Icon name="x" size={11} />
+                {turnState}
+              </button>
+            ) : null}
+            <button className="cb-send" disabled={!text.trim()} onClick={handleSend}><Icon name="arrowUp" size={14} stroke={2} /></button>
           </div>
         </div>
       </div>
