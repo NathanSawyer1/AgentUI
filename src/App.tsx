@@ -326,13 +326,13 @@ export function App() {
       <div className="workspace" ref={wrapRef}>
         {appError && <div className="error-banner app-banner">{appError}</div>}
         <div style={split ? { width: leftW + "%", display: "flex", minWidth: 0 } : { flex: 1, display: "flex", minWidth: 0 }}>
-          <Session onOpenSettings={() => setSettingsOpen(true)} onSplitWith={openSplitWith} onPopoutSession={openPopoutSession} splitActive={split} hideSidebar={popoutMode} sessionId={activeSessionId} sessions={sessions} sessionAliases={sessionAliases} pinnedSessionIds={pinnedSessionIds} onNewSession={newSession} onRenameSession={renameSession} onTogglePinSession={togglePinSession} onSessionSelect={selectSession} gateway={gateway} settings={settings} />
+          <Session onOpenSettings={() => setSettingsOpen(true)} onSplitWith={openSplitWith} onPopoutSession={openPopoutSession} splitActive={split} paneMode={popoutMode ? "popout" : "active"} hideSidebar={popoutMode} sessionId={activeSessionId} sessions={sessions} sessionAliases={sessionAliases} pinnedSessionIds={pinnedSessionIds} onNewSession={newSession} onRenameSession={renameSession} onTogglePinSession={togglePinSession} onSessionSelect={selectSession} gateway={gateway} settings={settings} />
         </div>
         {!popoutMode && split && (
           <>
             <div className="resizer" ref={resizerRef} onMouseDown={() => { dragging.current = true; document.body.style.cursor = "col-resize"; resizerRef.current?.classList.add("dragging"); }}></div>
             <div style={{ width: 100 - leftW + "%", display: "flex", minWidth: 0 }}>
-              <Session onOpenSettings={() => setSettingsOpen(true)} onPopoutSession={popoutSplitSession} onCloseSplit={() => setSplit(false)} canClose hideSidebar sessionId={splitSession?.id || "new-session"} sessions={sessions} sessionAliases={sessionAliases} pinnedSessionIds={pinnedSessionIds} gateway={gateway} settings={settings} />
+              <Session onOpenSettings={() => setSettingsOpen(true)} onPopoutSession={popoutSplitSession} onCloseSplit={() => setSplit(false)} canClose hideSidebar paneMode="split" sessionId={splitSession?.id || "new-session"} sessions={sessions} sessionAliases={sessionAliases} pinnedSessionIds={pinnedSessionIds} gateway={gateway} settings={settings} />
             </div>
           </>
         )}

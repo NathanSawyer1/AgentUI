@@ -1,6 +1,42 @@
 import type { SessionInfo } from "./types";
 
 // ---------------------------------------------------------------------------
+// Pane mode and identity helpers
+// ---------------------------------------------------------------------------
+
+export type PaneMode = "active" | "split" | "popout";
+
+export interface PaneInfo {
+  roleLabel: string;
+  title: string;
+  sessionIdFull: string;
+  status: SessionInfo["status"] | undefined;
+  time: string | undefined;
+}
+
+export function resolvePaneInfo(
+  paneMode: PaneMode,
+  sessionId: string,
+  sessions: SessionInfo[],
+  aliases: Record<string, string>,
+): PaneInfo {
+  const roleLabel: Record<PaneMode, string> = {
+    active: "Active",
+    split: "Split",
+    popout: "Popout",
+  };
+  const match = sessions.find((session) => session.id === sessionId || session.name === sessionId);
+  const resolvedId = match?.id ?? sessionId;
+  return {
+    roleLabel: roleLabel[paneMode],
+    title: aliases[resolvedId] || aliases[sessionId] || match?.name || sessionId,
+    sessionIdFull: resolvedId,
+    status: match?.status,
+    time: match?.time,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Session storage helpers (localStorage)
 // ---------------------------------------------------------------------------
 
@@ -114,7 +150,7 @@ export function createPendingSession(): SessionInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Active session title helpers
+// Legacy title helpers (kept for compatibility)
 // ---------------------------------------------------------------------------
 
 export function activeTitleFor(sessionId: string, aliases: Record<string, string>): string {

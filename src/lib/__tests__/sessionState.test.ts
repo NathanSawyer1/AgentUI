@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterSessions, organizeSessions, parseAgeLabel, trySavePinnedSessions, trySaveSessionAliases } from "../sessionState";
+import { filterSessions, organizeSessions, parseAgeLabel, resolvePaneInfo, trySavePinnedSessions, trySaveSessionAliases } from "../sessionState";
 import type { SessionInfo } from "../types";
 
 const sessions: SessionInfo[] = [
@@ -46,5 +46,29 @@ describe("session state helpers", () => {
         value: original,
       });
     }
+  });
+
+  it("resolves pane identity with alias, name, and id fallbacks", () => {
+    expect(resolvePaneInfo("active", "agent:main:one", sessions, { "agent:main:one": "Alias One" })).toMatchObject({
+      roleLabel: "Active",
+      title: "Alias One",
+      sessionIdFull: "agent:main:one",
+      status: "idle",
+      time: "1h",
+    });
+    expect(resolvePaneInfo("split", "agent:main:two", sessions, {})).toMatchObject({
+      roleLabel: "Split",
+      title: "two",
+      sessionIdFull: "agent:main:two",
+      status: "working",
+      time: "4d",
+    });
+    expect(resolvePaneInfo("popout", "agent:main:missing", sessions, {})).toEqual({
+      roleLabel: "Popout",
+      title: "agent:main:missing",
+      sessionIdFull: "agent:main:missing",
+      status: undefined,
+      time: undefined,
+    });
   });
 });

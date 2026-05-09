@@ -513,6 +513,89 @@ input, textarea {
 }
 .tb-crumb .sep { color: var(--fg-4); }
 .tb-crumb .agent { color: var(--fg-0); font-weight: 500; }
+
+.tb-pane-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  min-width: 0;
+  flex: 1;
+}
+.tb-role-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0;
+  background: var(--accent-soft);
+  color: var(--accent-fg);
+  border: 1px solid var(--accent-dim);
+}
+.tb-role-badge.active {
+  background: var(--bg-2);
+  color: var(--fg-1);
+  border-color: var(--line);
+}
+.tb-role-badge.split {
+  background: color-mix(in oklch, var(--ok) 12%, var(--bg-2));
+  color: var(--ok);
+  border-color: color-mix(in oklch, var(--ok) 35%, var(--line));
+}
+.tb-role-badge.popout {
+  background: color-mix(in oklch, var(--warn) 12%, var(--bg-2));
+  color: var(--warn);
+  border-color: color-mix(in oklch, var(--warn) 35%, var(--line));
+}
+.tb-pane-title {
+  color: var(--fg-0);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.tb-pane-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+  font-size: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+.tb-session-id {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.tb-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--fg-4);
+}
+.tb-status-dot.working { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.tb-status-dot.ok { background: var(--ok); }
+.tb-status-dot.err { background: var(--err); }
+.tb-status-dot.idle { background: var(--fg-4); }
+.tb-meta-detail {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
 .tb-status {
   display: flex;
   align-items: center;
