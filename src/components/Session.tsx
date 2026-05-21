@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppSettings, GatewayStatus, SessionInfo } from "../lib/types";
-import { resolvePaneInfo, type PaneMode } from "../lib/sessionState";
+import { paneAriaLabel, paneMetaText, paneTooltip, resolvePaneInfo, type PaneMode } from "../lib/sessionState";
 import { Chat } from "./Chat";
 import { Icon } from "./Icons";
 import { Sidebar, type NavView } from "./Sidebar";
@@ -44,7 +44,7 @@ export function Session({ onOpenSettings, onSplitWith, onPopoutSession, onCloseS
   const sideDrag = useRef(false);
   const currentSession = sessions.find((session) => session.id === sessionId || session.name === sessionId) || { id: sessionId, name: sessionAliases[sessionId] || sessionId, status: "idle" as const, time: "" };
   const paneInfo = resolvePaneInfo(paneMode, sessionId, sessions, sessionAliases);
-  const paneDetail = [paneInfo.status, paneInfo.time].filter(Boolean).join(" | ");
+  const paneDetail = paneMetaText(paneInfo);
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -102,12 +102,12 @@ export function Session({ onOpenSettings, onSplitWith, onPopoutSession, onCloseS
       <div className="main">
         <div className="topbar">
           {!hideSidebar && sidebarCollapsed && <button className="tb-btn icon-only" onClick={() => setSidebarCollapsed(false)} title="Show sidebar"><Icon name="chevRight" size={12} /></button>}
-          <div className="tb-pane-info" title={`${paneInfo.roleLabel}: ${paneInfo.title} (${paneInfo.sessionIdFull})`} aria-label={`${paneInfo.roleLabel} session ${paneInfo.title}`}>
+          <div className="tb-pane-info" data-pane-mode={paneInfo.mode} title={paneTooltip(paneInfo)} aria-label={paneAriaLabel(paneInfo)}>
             <span className={"tb-role-badge " + paneMode}>{paneInfo.roleLabel}</span>
             <span className="tb-pane-title">{paneInfo.title}</span>
             <span className="tb-pane-meta">
               <span className="tb-session-id" title={paneInfo.sessionIdFull}>{paneInfo.sessionIdFull}</span>
-              {paneInfo.status && <span className={"tb-status-dot " + paneInfo.status} title={paneInfo.status} />}
+              {paneInfo.status && <span className={"tb-status-dot " + paneInfo.status} title={paneDetail || paneInfo.status} />}
               {paneInfo.status && <span className="tb-meta-status">{paneInfo.status}</span>}
               {paneInfo.time && <span className="tb-meta-time">{paneInfo.time}</span>}
             </span>

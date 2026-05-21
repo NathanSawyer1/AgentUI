@@ -7,6 +7,7 @@ import type { SessionInfo } from "./types";
 export type PaneMode = "active" | "split" | "popout";
 
 export interface PaneInfo {
+  mode: PaneMode;
   roleLabel: string;
   title: string;
   sessionIdFull: string;
@@ -28,12 +29,27 @@ export function resolvePaneInfo(
   const match = sessions.find((session) => session.id === sessionId || session.name === sessionId);
   const resolvedId = match?.id ?? sessionId;
   return {
+    mode: paneMode,
     roleLabel: roleLabel[paneMode],
-    title: aliases[resolvedId] || aliases[sessionId] || match?.name || sessionId,
+    title: sessionTitleForId(sessionId, sessions, aliases),
     sessionIdFull: resolvedId,
     status: match?.status,
     time: match?.time,
   };
+}
+
+export function paneMetaText(info: PaneInfo): string {
+  return [info.status, info.time].filter(Boolean).join(" | ");
+}
+
+export function paneTooltip(info: PaneInfo): string {
+  const detail = paneMetaText(info);
+  return `${info.roleLabel}: ${info.title} (${info.sessionIdFull})${detail ? ` - ${detail}` : ""}`;
+}
+
+export function paneAriaLabel(info: PaneInfo): string {
+  const detail = paneMetaText(info);
+  return `${info.roleLabel} session ${info.title}, ${info.sessionIdFull}${detail ? `, ${detail}` : ""}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +156,12 @@ export function displaySessionTitle(session: SessionInfo, aliases: Record<string
   return aliases[session.id] || session.name || session.id;
 }
 
+export function sessionTitleForId(sessionId: string, sessions: SessionInfo[], aliases: Record<string, string>): string {
+  const match = sessions.find((session) => session.id === sessionId || session.name === sessionId);
+  const resolvedId = match?.id ?? sessionId;
+  return aliases[resolvedId] || aliases[sessionId] || match?.name || sessionId;
+}
+
 // ---------------------------------------------------------------------------
 // Pending session helpers
 // ---------------------------------------------------------------------------
@@ -153,8 +175,15 @@ export function createPendingSession(): SessionInfo {
 // Legacy title helpers (kept for compatibility)
 // ---------------------------------------------------------------------------
 
-export function activeTitleFor(sessionId: string, aliases: Record<string, string>): string {
-  return aliases[sessionId] || sessionId;
+export function activeTitleFor(
+  sessionId: string,
+  sessionsOrAliases: SessionInfo[] | Record<string, string>,
+  aliases: Record<string, string> = {},
+): string {
+  if (Array.isArray(sessionsOrAliases)) {
+    return sessionTitleForId(sessionId, sessionsOrAliases, aliases);
+  }
+  return sessionsOrAliases[sessionId] || sessionId;
 }
 
 export function splitTitleFor(session: SessionInfo | null, aliases: Record<string, string>): string {
@@ -163,7 +192,7 @@ export function splitTitleFor(session: SessionInfo | null, aliases: Record<strin
 
 export function windowTitle(activeTitle: string, split: boolean, splitSession: SessionInfo | null, aliases: Record<string, string>): string {
   if (split && splitSession) {
-    return `${activeTitle} <-> ${splitTitleFor(splitSession, aliases)}`;
+    return `Active: ${activeTitle} | Split: ${splitTitleFor(splitSession, aliases)}`;
   }
   return activeTitle;
 }

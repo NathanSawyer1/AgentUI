@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterSessions, organizeSessions, parseAgeLabel, resolvePaneInfo, trySavePinnedSessions, trySaveSessionAliases } from "../sessionState";
+import { activeTitleFor, filterSessions, organizeSessions, paneAriaLabel, paneMetaText, paneTooltip, parseAgeLabel, resolvePaneInfo, sessionTitleForId, trySavePinnedSessions, trySaveSessionAliases, windowTitle } from "../sessionState";
 import type { SessionInfo } from "../types";
 
 const sessions: SessionInfo[] = [
@@ -50,6 +50,7 @@ describe("session state helpers", () => {
 
   it("resolves pane identity with alias, name, and id fallbacks", () => {
     expect(resolvePaneInfo("active", "agent:main:one", sessions, { "agent:main:one": "Alias One" })).toMatchObject({
+      mode: "active",
       roleLabel: "Active",
       title: "Alias One",
       sessionIdFull: "agent:main:one",
@@ -57,6 +58,7 @@ describe("session state helpers", () => {
       time: "1h",
     });
     expect(resolvePaneInfo("split", "agent:main:two", sessions, {})).toMatchObject({
+      mode: "split",
       roleLabel: "Split",
       title: "two",
       sessionIdFull: "agent:main:two",
@@ -64,11 +66,28 @@ describe("session state helpers", () => {
       time: "4d",
     });
     expect(resolvePaneInfo("popout", "agent:main:missing", sessions, {})).toEqual({
+      mode: "popout",
       roleLabel: "Popout",
       title: "agent:main:missing",
       sessionIdFull: "agent:main:missing",
       status: undefined,
       time: undefined,
     });
+  });
+
+  it("builds consistent pane text for title, tooltip, and aria labels", () => {
+    const info = resolvePaneInfo("split", "agent:main:two", sessions, { "agent:main:two": "Review Split" });
+    expect(paneMetaText(info)).toBe("working | 4d");
+    expect(paneTooltip(info)).toBe("Split: Review Split (agent:main:two) - working | 4d");
+    expect(paneAriaLabel(info)).toBe("Split session Review Split, agent:main:two, working | 4d");
+  });
+
+  it("resolves session titles from aliases, names, and ids", () => {
+    expect(sessionTitleForId("agent:main:one", sessions, { "agent:main:one": "Alias One" })).toBe("Alias One");
+    expect(sessionTitleForId("agent:main:two", sessions, {})).toBe("two");
+    expect(sessionTitleForId("agent:main:missing", sessions, {})).toBe("agent:main:missing");
+    expect(activeTitleFor("agent:main:one", sessions, {})).toBe("one");
+    expect(activeTitleFor("agent:main:one", { "agent:main:one": "Legacy Alias" })).toBe("Legacy Alias");
+    expect(windowTitle("one", true, sessions[1], {})).toBe("Active: one | Split: two");
   });
 });

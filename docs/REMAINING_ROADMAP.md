@@ -27,8 +27,8 @@ Goal: make repeated session switching, searching, and navigation fast and predic
   - Command palette actions for recent/pinned sessions and split target selection are implemented.
   - Verify Escape/Enter/Arrow behavior across palette and modal flows.
 - Polish split/popout behavior:
-  - Confirm title updates for active session changes.
-  - Make active session clarity stronger in split and popout windows.
+  - Window titles now resolve active/split session aliases and OpenClaw session names before falling back to raw IDs.
+  - Split and popout pane labels, tooltips, and accessible labels now share one normalized identity helper.
   - Smoke test clean close handling for split, popout, terminal, and logs.
 
 ### Done When

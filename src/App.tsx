@@ -275,7 +275,7 @@ export function App() {
   };
 
   const selectSession = (session: SessionInfo) => setActiveSessionId(session.id);
-  const activeTitle = activeTitleFor(activeSessionId, sessionAliases);
+  const activeTitle = activeTitleFor(activeSessionId, sessions, sessionAliases);
   const splitTitle = splitTitleFor(splitSession, sessionAliases);
   const titleSession = windowTitle(activeTitle, split, splitSession, sessionAliases);
   const statusItemValues: Record<StatusLineItemId, string> = {
