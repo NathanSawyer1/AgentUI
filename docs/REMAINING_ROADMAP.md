@@ -47,9 +47,9 @@ Several debugging upgrades are already implemented. Remaining follow-up:
   - File filtering and copy-patch fallback behavior are covered by tests.
   - Verify copy path/patch in Tauri runtime, not only browser build.
 - Terminal:
-  - Cwd display uses workspace status instead of hardcoded `.` where possible.
+  - Cwd display uses workspace status and now prints the resolved workspace context in the terminal stream.
   - Recent command/rerun state helpers are extracted and covered by tests.
-  - Non-zero exits show clearer command failure summaries.
+  - Non-zero exits and cancellations show command-specific completion summaries.
 - Logs:
   - Add export-to-file if needed after copy-visible logs is validated.
   - Add tests for level filter UI state if the logic is extracted.

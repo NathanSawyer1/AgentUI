@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listenTerminal, terminalCancel, terminalRun, workspaceStatus } from "../lib/openclaw";
 import type { TermLine } from "../lib/types";
 import { Icon } from "../components/Icons";
-import { nextRecentCommands, terminalExitLine, workspaceCwdLabel } from "../lib/terminalState";
+import { nextRecentCommands, terminalExitLine, workspaceCwdInfoLine, workspaceCwdLabel } from "../lib/terminalState";
 
 interface TerminalProps {
   onClose: () => void;
@@ -21,6 +21,9 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const acceptNextRunRef = useRef(false);
   const completedRunsRef = useRef(new Set<string>());
+  const canceledRunsRef = useRef(new Set<string>());
+  const commandByRunRef = useRef(new Map<string, string>());
+  const pendingCommandRef = useRef<string | null>(null);
   const runIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -31,9 +34,16 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
     let cancelled = false;
     void workspaceStatus()
       .then((workspace) => {
-        if (!cancelled) setCwd(workspaceCwdLabel(workspace));
+        if (!cancelled) {
+          setCwd(workspaceCwdLabel(workspace));
+          setLines((current) => [...current, workspaceCwdInfoLine(workspace)]);
+        }
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (!cancelled) {
+          setLines((current) => [...current, { kind: "warn", text: `could not read workspace cwd; using app launch cwd (${error instanceof Error ? error.message : String(error)})` }]);
+        }
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -51,8 +61,12 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
           setLines((current) => [...current, { kind: "err", text: event.error }]);
         }
         if (event.done) {
-          setLines((current) => [...current, terminalExitLine(event.exitCode)]);
+          const command = commandByRunRef.current.get(event.runId) || pendingCommandRef.current || undefined;
+          const canceled = canceledRunsRef.current.has(event.runId);
+          setLines((current) => [...current, terminalExitLine(event.exitCode, command, canceled)]);
           completedRunsRef.current.add(event.runId);
+          canceledRunsRef.current.delete(event.runId);
+          commandByRunRef.current.delete(event.runId);
           return null;
         }
         return event.runId;
@@ -84,12 +98,16 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
     setInput("");
     setRecent((current) => nextRecentCommands(current, command));
     setLines((current) => [...current, { kind: "prompt", cwd, cmd: command }]);
+    pendingCommandRef.current = command;
     acceptNextRunRef.current = true;
     try {
       const started = await terminalRun(command, cwd === "." ? undefined : cwd);
+      commandByRunRef.current.set(started.runId, command);
+      pendingCommandRef.current = null;
       setRunId((current) => current ?? (completedRunsRef.current.has(started.runId) ? null : started.runId));
     } catch (error) {
       acceptNextRunRef.current = false;
+      pendingCommandRef.current = null;
       setLines((current) => [...current, { kind: "err", text: error instanceof Error ? error.message : String(error) }]);
     }
   };
@@ -98,7 +116,9 @@ export function Terminal({ onClose, placement, onTogglePlacement, height }: Term
     if (!runId) return;
     const id = runId;
     setRunId(null);
-    setLines((current) => [...current, { kind: "warn", text: "cancel requested" }]);
+    canceledRunsRef.current.add(id);
+    const command = commandByRunRef.current.get(id) || pendingCommandRef.current || "command";
+    setLines((current) => [...current, { kind: "warn", text: `cancel requested for \`${command}\`` }]);
     await terminalCancel(id).catch((error) => setLines((current) => [...current, { kind: "err", text: String(error) }]));
   };
 
