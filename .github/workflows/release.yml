@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.rust/cargo
+      RUSTUP_HOME: ${{ github.workspace }}/.rust/rustup
     steps:
       - name: Checkout
         uses: actions/checkout@v4
