@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { appendLogLines, filterLogs, FULL_LOG_LIMIT, INITIAL_LOG_LIMIT, logLineFromEventLine, type LogLevelFilter, type LogLine, preservedLogScrollTop, shouldStickToBottom } from "../lib/logs";
+import { appendLogLines, filterLogs, FULL_LOG_LIMIT, INITIAL_LOG_LIMIT, LOG_LEVEL_FILTERS, logExportFilename, logFilterSummary, logLineFromEventLine, type LogLevelFilter, type LogLine, preservedLogScrollTop, shouldStickToBottom, visibleLogText } from "../lib/logs";
 import { listenLogs, logsStop, logsTail } from "../lib/openclaw";
 import { Icon } from "../components/Icons";
 import type { JsonValue } from "../lib/types";
@@ -69,6 +69,8 @@ export function Logs() {
   const filtered = useMemo(() => {
     return filterLogs(lines, query, levelFilter);
   }, [lines, query, levelFilter]);
+  const visibleText = useMemo(() => visibleLogText(filtered), [filtered]);
+  const summary = logFilterSummary(lines.length, filtered.length, query, levelFilter);
 
   async function startRun(limit: number, nextFollow: boolean, hydrateAfter: boolean) {
     if (runId) await logsStop(runId).catch(() => undefined);
@@ -99,24 +101,38 @@ export function Logs() {
     await startRun(INITIAL_LOG_LIMIT, false, nextFollow);
   }
 
+  function exportVisibleLogs() {
+    if (!visibleText) return;
+    const blob = new Blob([visibleText + "\n"], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = logExportFilename();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="logs-panel">
       <div className="panel-head">
         <div className="panel-title"><Icon name="list" size={12} /> Logs</div>
         <div className="panel-spacer"></div>
         <button className="panel-btn text" onClick={() => void start(!follow)} title={follow ? "Pause live logs" : "Resume live logs"}>{follow && runId ? "Pause" : "Resume"}</button>
-        <button className="panel-btn text" onClick={() => void navigator.clipboard?.writeText(filtered.map((line) => line.text).join("\n")).catch(() => undefined)} title="Copy visible logs">Copy</button>
+        <button className="panel-btn text" disabled={!visibleText} onClick={() => void navigator.clipboard?.writeText(visibleText).catch(() => undefined)} title="Copy visible logs">Copy</button>
+        <button className="panel-btn text" disabled={!visibleText} onClick={exportVisibleLogs} title="Export visible logs">Export</button>
         <button className="panel-btn text" onClick={() => setLines([])} title="Clear logs">Clear</button>
       </div>
       <div className="logs-toolbar">
         <Icon name="search" size={12} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search logs" />
-        {(["all", "error", "warn", "info", "debug", "malformed"] as LogLevelFilter[]).map((level) => (
+        {LOG_LEVEL_FILTERS.map((level) => (
           <button key={level} className={"logs-filter" + (levelFilter === level ? " active" : "")} onClick={() => setLevelFilter(level)}>
             {level}
           </button>
         ))}
-        <span>{runId ? (follow ? "following" : "loaded") : "stopped"}</span>
+        <span>{runId ? (follow ? "following" : "loaded") : "stopped"} - {summary}</span>
       </div>
       {error && <div className="error-banner inline">{error}</div>}
       <div className="logs-body" ref={bodyRef}>

@@ -34,6 +34,7 @@ export function mergeHydratedLogs(current: LogLine[], hydrated: LogLine[], cap =
 }
 
 export type LogLevelFilter = "all" | "error" | "warn" | "info" | "debug" | "malformed";
+export const LOG_LEVEL_FILTERS: LogLevelFilter[] = ["all", "error", "warn", "info", "debug", "malformed"];
 
 export function normalizeLogLevel(level?: string): string {
   const text = (level || "").trim().toLowerCase();
@@ -60,6 +61,20 @@ export function filterLogs(lines: LogLine[], query: string, level: LogLevelFilte
     }
     return !needle || line.text.toLowerCase().includes(needle);
   });
+}
+
+export function visibleLogText(lines: LogLine[]): string {
+  return lines.map((line) => line.text).join("\n");
+}
+
+export function logExportFilename(now = new Date()): string {
+  return `agentui-logs-${now.toISOString().replace(/[:.]/g, "-")}.log`;
+}
+
+export function logFilterSummary(total: number, visible: number, query: string, level: LogLevelFilter): string {
+  const filtered = query.trim() || level !== "all";
+  if (!filtered) return `${total} ${total === 1 ? "line" : "lines"}`;
+  return `${visible} of ${total} visible`;
 }
 
 export function shouldStickToBottom(scrollTop: number, clientHeight: number, scrollHeight: number): boolean {

@@ -51,8 +51,8 @@ Several debugging upgrades are already implemented. Remaining follow-up:
   - Recent command/rerun state helpers are extracted and covered by tests.
   - Non-zero exits and cancellations show command-specific completion summaries.
 - Logs:
-  - Add export-to-file if needed after copy-visible logs is validated.
-  - Add tests for level filter UI state if the logic is extracted.
+  - Visible logs can now be copied or exported to a timestamped `.log` file.
+  - Level filter options, visible export text, export filenames, and filter summaries are covered by tests.
   - Validate malformed JSON handling against real `openclaw logs` output.
 - Caching:
   - Reconfirm all new runtime caches are memory-only.
