@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, for example v0.1.1-alpha.1"
+        required: true
+        type: string
 
 jobs:
   linux-release:
@@ -14,9 +19,12 @@ jobs:
     env:
       CARGO_HOME: ${{ github.workspace }}/.rust/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.rust/rustup
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Install Linux dependencies
         run: |
@@ -44,13 +52,38 @@ jobs:
       - name: Build Linux bundles
         run: OPENCLAW_MOCK=1 npm run tauri:build
 
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          )
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "No release artifacts found." >&2
+            exit 1
+          fi
+          sha256sum "${artifacts[@]}" | tee SHA256SUMS.txt
+          {
+            echo "## SHA256 checksums"
+            echo
+            echo '```text'
+            cat SHA256SUMS.txt
+            echo '```'
+          } > RELEASE_CHECKSUMS.md
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           generate_release_notes: true
+          body_path: RELEASE_CHECKSUMS.md
           fail_on_unmatched_files: true
           files: |
+            SHA256SUMS.txt
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage

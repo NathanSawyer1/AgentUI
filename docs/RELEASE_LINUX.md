@@ -52,6 +52,24 @@ AgentUI-0.1.0-linux-amd64.deb
 
 Keep the generated Tauri artifact path in the release notes, usually under `src-tauri/target/release/bundle/`.
 
+## GitHub Release Workflow
+
+Push a version tag to publish a release:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+Use a hyphenated tag for a pre-release:
+
+```bash
+git tag v0.1.1-alpha.1
+git push origin v0.1.1-alpha.1
+```
+
+The release workflow marks hyphenated tags as GitHub pre-releases, uploads the `.deb`, AppImage, and `SHA256SUMS.txt`, and prepends the checksum block to generated release notes.
+
 ## Install And Run Smoke
 
 For each generated Linux artifact:
@@ -75,7 +93,7 @@ For each generated Linux artifact:
 Include:
 
 - Version and commit SHA.
-- Artifact names and checksums.
+- Artifact names and checksums. The release workflow generates `SHA256SUMS.txt` for GitHub Releases.
 - Whether mock and live smoke checks passed.
 - Known limitations or capability-gated behavior.
 - OpenClaw version used for live validation.

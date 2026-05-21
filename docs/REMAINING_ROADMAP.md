@@ -83,7 +83,7 @@ OPENCLAW_MOCK=1 npm run tauri:build
 ```
 
 - If AppImage runtime download remains unreliable in CI, add a documented/manual runtime download path or CI cache for the AppImage runtime.
-- Add artifact checksums to release notes.
+- Release workflow now uploads `SHA256SUMS.txt`, includes checksum text in release notes, and marks hyphenated tags as GitHub pre-releases.
 - Run install/run smoke tests for both `.deb` and `.AppImage`.
 - Validate clean reinstall behavior.
 - Run mock mode and live mode smoke checklists.
