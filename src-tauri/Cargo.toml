@@ -1,6 +1,6 @@
 [package]
 name = "agentui"
-version = "0.1.0"
+version = "0.1.1-alpha.1"
 description = "AgentUI desktop shell for openclaw"
 authors = ["Nathan"]
 edition = "2021"
